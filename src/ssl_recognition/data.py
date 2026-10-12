@@ -88,12 +88,17 @@ def build_label_map(clips: list[Clip]) -> dict[str, int]:
 
 
 def split_clips(
-    clips: list[Clip], seed: int = 42, val_frac: float = 0.15, test_signer: str | None = None
+    clips: list[Clip],
+    seed: int = 42,
+    val_frac: float = 0.15,
+    test_signer: str | None = None,
+    official: bool = False,
 ) -> tuple[list[Clip], list[Clip], list[Clip]]:
     """Split into train/val/test.
 
-    If ``test_signer`` is given, every clip of that signer becomes the test set
-    (signer-independent evaluation). Otherwise a stratified random 70/15/15 split.
+    ``test_signer``: every clip of that signer becomes the test set (signer-independent).
+    ``official``: clips named ``*_test_*`` form the test set (KArSL's published split).
+    Otherwise a stratified random 70/15/15 split. Validation is always carved from train.
     """
     rng = random.Random(seed)
     if test_signer is not None:
@@ -101,6 +106,13 @@ def split_clips(
         rest = [c for c in clips if c.signer != test_signer]
         if not test:
             raise ValueError(f"No clips for signer {test_signer!r}")
+    elif official:
+        # KArSL ships an official split encoded in the file name: <signer>_train_* / <signer>_test_*
+        is_test = [c.path is not None and "_test_" in c.path.name for c in clips]
+        test = [c for c, t in zip(clips, is_test, strict=True) if t]
+        rest = [c for c, t in zip(clips, is_test, strict=True) if not t]
+        if not test:
+            raise ValueError("official split requested but no '_test_' clips found")
     else:
         test, rest = [], list(clips)
 
@@ -108,7 +120,7 @@ def split_clips(
     for c in rest:
         by_label.setdefault(c.label, []).append(c)
     train, val = [], []
-    test_frac = 0.0 if test_signer is not None else val_frac
+    test_frac = 0.0 if (test_signer is not None or official) else val_frac
     for _, items in sorted(by_label.items()):
         rng.shuffle(items)
         n = len(items)

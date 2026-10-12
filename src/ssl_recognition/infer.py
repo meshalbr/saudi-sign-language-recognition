@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import json
 import time
 from pathlib import Path
 
@@ -22,8 +23,15 @@ from .landmarks import HolisticExtractor, draw_result
 
 
 class Predictor:
-    def __init__(self, run_dir: Path, use_onnx: bool = False):
+    def __init__(self, run_dir: Path, use_onnx: bool = False, names: Path | None = None):
         self.labels = load_labels(run_dir / "labels.json")
+        if names is not None and Path(names).exists():
+            # Optional display names, e.g. data/karsl_labels.json: {"0071": {"ar":..., "en":...}}
+            table = json.loads(Path(names).read_text(encoding="utf-8"))
+            self.labels = [
+                f"{lab} {table[lab]['en']}" if lab in table and "en" in table[lab] else lab
+                for lab in self.labels
+            ]
         self.use_onnx = use_onnx
         if use_onnx:
             import onnxruntime as ort
@@ -66,9 +74,10 @@ def main() -> None:
     ap.add_argument("--stride", type=int, default=5)
     ap.add_argument("--threshold", type=float, default=0.6)
     ap.add_argument("--camera", type=int, default=0)
+    ap.add_argument("--names", default="data/karsl_labels.json", help="label display names")
     args = ap.parse_args()
 
-    pred = Predictor(Path(args.run), use_onnx=args.onnx)
+    pred = Predictor(Path(args.run), use_onnx=args.onnx, names=Path(args.names))
     cap = cv2.VideoCapture(args.camera, cv2.CAP_DSHOW)
     if not cap.isOpened():
         raise SystemExit("Could not open the webcam")

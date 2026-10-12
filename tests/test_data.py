@@ -48,6 +48,24 @@ def test_split_by_signer():
     assert len(train) + len(val) == 12
 
 
+def test_official_split_uses_test_token_in_filename(tmp_path):
+    from pathlib import Path
+
+    clips = []
+    for lab in ("a", "b"):
+        for i in range(6):
+            c = _clip(lab, "s1", seed=i)
+            c.path = Path(f"{lab}/s1_train_{i:03d}.npz")
+            clips.append(c)
+        for i in range(2):
+            c = _clip(lab, "s1", seed=10 + i)
+            c.path = Path(f"{lab}/s1_test_{i:03d}.npz")
+            clips.append(c)
+    train, val, test = split_clips(clips, official=True)
+    assert len(test) == 4 and all("_test_" in c.path.name for c in test)
+    assert len(train) + len(val) == 12 and all("_train_" in c.path.name for c in train + val)
+
+
 def test_save_and_load_roundtrip(tmp_path):
     c = _clip("hello", "s1")
     save_clip(tmp_path / "hello" / "s1_000.npz", c.x, c.label, c.signer, 30.0)

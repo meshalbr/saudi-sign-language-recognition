@@ -37,7 +37,10 @@ def train(cfg: dict, test_signer: str | None = None) -> dict:
     clips = load_dataset(Path(cfg["data_dir"]))
     label_map = build_label_map(clips)
     train_clips, val_clips, test_clips = split_clips(
-        clips, seed=int(cfg.get("seed", 42)), test_signer=test_signer
+        clips,
+        seed=int(cfg.get("seed", 42)),
+        test_signer=test_signer,
+        official=bool(cfg.get("official_split", False)) and test_signer is None,
     )
     print(
         f"clips: train={len(train_clips)} val={len(val_clips)} test={len(test_clips)} "
