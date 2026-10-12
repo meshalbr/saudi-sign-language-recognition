@@ -2,7 +2,11 @@ numpy
 opencv-python
 mediapipe
 torch
+onnx
 onnxruntime
+gdown
+py7zr
+openpyxl
 pyyaml
 tqdm
 scikit-learn

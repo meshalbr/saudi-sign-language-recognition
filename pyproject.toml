@@ -15,6 +15,7 @@ dependencies = [
   "opencv-python",
   "mediapipe",
   "torch",
+  "onnx",
   "onnxruntime",
   "pyyaml",
   "tqdm",
