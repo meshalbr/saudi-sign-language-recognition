@@ -1,0 +1,13 @@
+# Baseline GRU on MediaPipe landmarks
+data_dir: data/landmarks
+seq_len: 32
+batch_size: 32
+epochs: 30
+lr: 0.001
+weight_decay: 0.0001
+hidden: 128
+layers: 2
+dropout: 0.3
+augment: true
+seed: 42
+out_dir: runs/baseline

@@ -1,0 +1,10 @@
+numpy
+opencv-python
+mediapipe
+torch
+onnxruntime
+pyyaml
+tqdm
+scikit-learn
+pytest
+ruff
