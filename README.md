@@ -8,9 +8,10 @@ body-normalised landmark numbers, and a small bidirectional GRU classifies the s
 frames into a sign. That keeps the training data tiny, inference fast on a CPU, and the
 signer's face out of the pipeline.
 
-> Status: week 0. Pipeline, recorder, trainer, ONNX export and live demo are in place and
-> tested (11 tests, CI green). KArSL-100 for all three signers is downloaded (15,117 videos)
-> and landmark extraction is running. First real baseline lands in `reports/results.md`.
+> Status: day 1. Pipeline, recorder, trainer, ONNX export and live demo are in place and
+> tested (11 tests, CI green). First baseline: **99.0% top-1 on KArSL-100 (100 signs, official
+> split, signer 01)** with a 566k-parameter BiGRU trained on the laptop CPU. Signers 02 and 03
+> are being extracted for the signer-independent evaluation, which is the number that matters.
 
 ## Why this matters
 
@@ -103,6 +104,7 @@ here as they land.
 | Date | Data | Split | Top-1 | Top-5 | Notes |
 |---|---|---|---|---|---|
 | 2026-10-12 | 6 signs, signer 01 | official | 0.88 | 1.00 | smoke run on partial data, validates the loop only |
+| 2026-10-12 | KArSL-100, signer 01, 100 classes | official (800 test clips) | **0.990** | 0.998 | BiGRU, 566k params, trained on the laptop CPU in 37 min. Signer-dependent. |
 
 ## Edge benchmark
 
