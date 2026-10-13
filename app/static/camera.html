@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SSL Phone Camera</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Tajawal:wght@700;800&family=Sora:wght@500;600&display=swap">
+<style>
+:root{--bg:#0F1419;--ink:#EEF2F6;--muted:#8B9AAB;--teal:#2FBFC9;--green:#3DD68C;--red:#F06A6A;--panel:rgba(15,20,25,.82)}
+*{box-sizing:border-box} html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font-family:"Sora",system-ui,sans-serif;overflow:hidden}
+#stage{position:fixed;inset:0}
+video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.mirror video,.mirror canvas{transform:scaleX(-1)}
+.top{position:fixed;left:0;right:0;top:0;padding:calc(env(safe-area-inset-top,0px) + 10px) 14px 10px;display:flex;gap:8px;align-items:center;background:linear-gradient(var(--panel),transparent)}
+.chip{font-size:12px;padding:4px 10px;border-radius:999px;background:rgba(0,0,0,.4);color:var(--muted)}
+.chip.on{color:var(--green)}
+.bottom{position:fixed;left:0;right:0;bottom:0;padding:12px 14px calc(env(safe-area-inset-bottom,0px) + 14px);background:linear-gradient(transparent,var(--panel));display:flex;flex-direction:column;gap:10px}
+.word{font-family:"Tajawal",sans-serif;font-weight:800;font-size:44px;text-align:center;direction:rtl;min-height:1.2em}
+.state{text-align:center;font-size:14px;color:var(--muted)}
+.state.rec{color:var(--red)} .state.got{color:var(--green)}
+.row{display:flex;gap:10px}
+button{font:inherit;font-weight:600;border:0;border-radius:12px;padding:14px;flex:1;background:rgba(255,255,255,.12);color:var(--ink)}
+button.primary{background:var(--teal);color:#06282B}
+.gate{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;background:var(--bg)}
+.gate h1{font-size:22px;margin:0} .gate p{color:var(--muted);margin:0;max-width:34ch}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div id="stage" class="mirror"><video id="video" playsinline muted autoplay></video><canvas id="overlay"></canvas></div>
+<div class="top"><span class="chip" id="cConn">connecting…</span><span class="chip" id="cMode">—</span><span class="chip" id="cFps">0 fps</span></div>
+<div class="bottom">
+  <div class="word" id="word"></div>
+  <div class="state" id="state">Sign, then lower your hands. The result shows on the laptop.</div>
+  <div class="row"><button id="btnFlip">Switch camera</button><button class="primary" id="btnDone">Done</button></div>
+</div>
+<div class="gate" id="gate">
+  <h1>Phone camera</h1>
+  <p>Your phone films you and sends the hand movement to the laptop, where the result is shown.</p>
+  <button class="primary" id="btnStart" style="flex:none;padding:14px 28px">Start camera</button>
+  <p id="err"></p>
+</div>
+<script type="module">
+const $=id=>document.getElementById(id);
+const video=$('video'), overlay=$('overlay'), ctx=overlay.getContext('2d');
+let stream=null, facing='user', ws=null, inflight=false, landmarker=null, fast=false, forceEnd=false, lastTs=-1;
+let fpsN=0, fpsT=performance.now(), lastPreview=0;
+const prev=document.createElement('canvas'), pctx=prev.getContext('2d');
+const POSE_IDX=[0,11,12,13,14,15,16,23,24];
+const HAND_EDGES=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+
+async function loadLandmarker(){
+  try{
+    const vision=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/vision_bundle.mjs');
+    const files=await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm');
+    landmarker=await vision.HolisticLandmarker.createFromOptions(files,{baseOptions:{modelAssetPath:'/models/holistic_landmarker.task',delegate:'GPU'},runningMode:'VIDEO'});
+    fast=true; $('cMode').textContent='phone GPU';
+  }catch(e){ console.warn(e); fast=false; $('cMode').textContent='laptop CPU'; }
+}
+function feats(res){
+  const f=new Float32Array(155); const pose=res.poseLandmarks&&res.poseLandmarks[0];
+  if(!pose||pose.length<33) return {f,lm:{pose:[],left:[],right:[]}};
+  const l=pose[11],r=pose[12],cx=(l.x+r.x)/2,cy=(l.y+r.y)/2,cz=(l.z+r.z)/2; let s=Math.hypot(l.x-r.x,l.y-r.y); if(!(s>1e-3)) s=1;
+  POSE_IDX.forEach((pi,k)=>{const p=pose[pi]; f[k*3]=(p.x-cx)/s; f[k*3+1]=(p.y-cy)/s; f[k*3+2]=(p.z-cz)/s;});
+  const L=res.leftHandLandmarks&&res.leftHandLandmarks[0], R=res.rightHandLandmarks&&res.rightHandLandmarks[0];
+  if(L&&L.length>=21){L.forEach((p,k)=>{f[27+k*3]=(p.x-cx)/s;f[28+k*3]=(p.y-cy)/s;f[29+k*3]=(p.z-cz)/s;}); f[153]=1;}
+  if(R&&R.length>=21){R.forEach((p,k)=>{f[90+k*3]=(p.x-cx)/s;f[91+k*3]=(p.y-cy)/s;f[92+k*3]=(p.z-cz)/s;}); f[154]=1;}
+  const pts=a=>a?a.map(p=>[+p.x.toFixed(4),+p.y.toFixed(4)]):[];
+  return {f,lm:{pose:pts(pose).slice(0,25),left:pts(L),right:pts(R)}};
+}
+function draw(lm){
+  const W=overlay.width=overlay.clientWidth,H=overlay.height=overlay.clientHeight; ctx.clearRect(0,0,W,H);
+  const vw=video.videoWidth||4,vh=video.videoHeight||3,s=Math.max(W/vw,H/vh),ox=(W-vw*s)/2,oy=(H-vh*s)/2,P=p=>[ox+p[0]*vw*s,oy+p[1]*vh*s];
+  for(const [pts,col] of [[lm.left,'#3DD68C'],[lm.right,'#F2B83B']]){ if(!pts.length) continue; ctx.strokeStyle=col; ctx.lineWidth=3; HAND_EDGES.forEach(([a,b])=>{const A=P(pts[a]),B=P(pts[b]); ctx.beginPath(); ctx.moveTo(...A); ctx.lineTo(...B); ctx.stroke();}); }
+}
+function sendPreview(){
+  const now=performance.now(); if(now-lastPreview<150||!ws||ws.readyState!==1||ws.bufferedAmount>200000) return; lastPreview=now;
+  const w=240,h=Math.round(240*video.videoHeight/video.videoWidth); prev.width=w; prev.height=h; pctx.drawImage(video,0,0,w,h);
+  prev.toBlob(b=>{ if(b&&ws.readyState===1) b.arrayBuffer().then(buf=>ws.send(buf)); },'image/jpeg',0.6);
+}
+function step(){
+  requestAnimationFrame(step);
+  if(!ws||ws.readyState!==1||inflight||!video.videoWidth||video.readyState<2) return;
+  if(fast){
+    let ts=performance.now(); if(ts<=lastTs) ts=lastTs+1; lastTs=ts;
+    const {f,lm}=feats(landmarker.detectForVideo(video,ts)); draw(lm);
+    const msg={f:Array.from(f,v=>Math.round(v*10000)/10000),t:ts,lm}; if(forceEnd){msg.end=true; forceEnd=false;}
+    inflight=true; ws.send(JSON.stringify(msg)); sendPreview();
+  }else{
+    if(forceEnd){ forceEnd=false; ws.send(JSON.stringify({end:true})); }
+    const w=320,h=Math.round(320*video.videoHeight/video.videoWidth); prev.width=w; prev.height=h; pctx.drawImage(video,0,0,w,h);
+    inflight=true; prev.toBlob(b=>{ if(b&&ws.readyState===1) b.arrayBuffer().then(buf=>ws.send(buf)); else inflight=false; },'image/jpeg',0.65);
+  }
+}
+function connect(){
+  ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/${fast?'ws_feat':'ws'}`); ws.binaryType='arraybuffer';
+  ws.onopen=()=>{inflight=false; $('cConn').textContent='connected to laptop'; $('cConn').classList.add('on');};
+  ws.onmessage=e=>{ inflight=false; const r=JSON.parse(e.data);
+    fpsN++; const now=performance.now(); if(now-fpsT>1000){$('cFps').textContent=Math.round(fpsN*1000/(now-fpsT))+' fps'; fpsN=0; fpsT=now;}
+    if(!fast&&r.lm) draw(r.lm);
+    if(r.final){ $('word').textContent=r.final[0].ar||r.final[0].en; $('state').textContent='Got it. Sign the next word.'; $('state').className='state got'; }
+    else if(r.recording>0){ $('state').textContent='Recording sign…'; $('state').className='state rec'; }
+  };
+  ws.onclose=()=>{ $('cConn').textContent='reconnecting…'; $('cConn').classList.remove('on'); setTimeout(connect,1200); };
+}
+async function start(){
+  try{
+    if(stream) stream.getTracks().forEach(t=>t.stop());
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:640},height:{ideal:480}},audio:false});
+    video.srcObject=stream; await video.play(); $('gate').hidden=true;
+    if(!landmarker&&!ws){ $('cMode').textContent='loading model…'; await loadLandmarker(); }
+    if(!ws){ connect(); requestAnimationFrame(step); }
+    try{ await navigator.wakeLock?.request('screen'); }catch(e){}
+  }catch(e){ $('err').textContent='Camera blocked: '+e.message; }
+}
+$('btnStart').onclick=start;
+$('btnDone').onclick=()=>{ forceEnd=true; };
+$('btnFlip').onclick=()=>{ facing=facing==='user'?'environment':'user'; $('stage').classList.toggle('mirror',facing==='user'); start(); };
+</script>
+</body>
+</html>

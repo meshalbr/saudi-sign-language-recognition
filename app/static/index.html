@@ -26,6 +26,11 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
 .stage.mirror video,.stage.mirror canvas{transform:scaleX(-1)}
 .gate{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(15,20,25,.88);text-align:center;padding:20px}
 .gate h2{margin:0;font-size:22px} .gate p{margin:0;color:var(--muted);max-width:40ch}
+.gatebtns{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.qr{background:#fff;padding:12px;border-radius:12px;line-height:0}
+.mono{font-family:ui-monospace,Consolas,monospace;color:var(--teal)!important;user-select:all}
+#phoneView{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.stage.mirror #phoneView{transform:scaleX(-1)}
 .btn{font:inherit;font-weight:600;border:0;border-radius:10px;padding:12px 20px;background:var(--teal);color:#06282B;cursor:pointer}
 .btn.ghost{background:var(--panel2);color:var(--ink);border:1px solid var(--line)}
 .btn:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
@@ -91,12 +96,20 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
 <main>
   <section class="stage mirror" id="stage">
     <video id="video" playsinline muted autoplay></video>
+    <img id="phoneView" alt="" hidden>
     <canvas id="overlay"></canvas>
     <div class="gate" id="gate">
-      <h2>Enable the camera</h2>
-      <p>Frames are sent to your laptop over your own Wi-Fi, analysed there, and never stored.</p>
-      <button class="btn" id="btnEnable">Enable camera</button>
+      <h2>Choose a camera</h2>
+      <p>Everything stays on your own Wi-Fi and nothing is stored.</p>
+      <div class="gatebtns"><button class="btn" id="btnPhone">Use my phone as camera</button><button class="btn ghost" id="btnEnable">Use this laptop's camera</button></div>
       <p class="muted" id="gateErr"></p>
+    </div>
+    <div class="gate" id="pair" hidden>
+      <h2>Scan with your phone</h2>
+      <div id="qr" class="qr"></div>
+      <p class="mono" id="pairUrl"></p>
+      <p>Same Wi-Fi as this laptop. Accept the security warning once, press Start camera, then sign. Results appear here.</p>
+      <button class="btn ghost" id="btnPairCancel">Back</button>
     </div>
     <div class="toolbar">
       <button class="btn ghost" id="btnFlip" title="switch front/back camera">Switch camera</button>
@@ -153,6 +166,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   </aside>
 </main>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 (function(){
   const $=id=>document.getElementById(id);
@@ -262,7 +276,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
     const res=landmarker.detectForVideo(video,ts);
     const {f,lm}=featuresFromResult(res);
     drawLandmarks(lm); lastLm=lm;
-    const msg={f:Array.from(f,v=>Math.round(v*10000)/10000)}; if(forceEnd){ msg.end=true; forceEnd=false; }
+    const msg={f:Array.from(f,v=>Math.round(v*10000)/10000),t:ts}; if(forceEnd){ msg.end=true; forceEnd=false; }
     inflight=true; ws.send(JSON.stringify(msg));
   }
   let lastLm={pose:[],left:[],right:[]};
@@ -287,7 +301,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   function pump(){
     if(fastMode){ fastStep(); return; }
     if(!ws||ws.readyState!==1||inflight||!video.videoWidth) return;
-    if(forceEnd){ forceEnd=false; inflight=true; ws.send(new TextEncoder().encode('END')); return; }
+    if(forceEnd){ forceEnd=false; inflight=true; ws.send(JSON.stringify({end:true})); return; }
     const w=320, h=Math.round(320*video.videoHeight/video.videoWidth); sendCanvas.width=w; sendCanvas.height=h;
     sctx.drawImage(video,0,0,w,h);
     sendCanvas.toBlob(b=>{ if(!b||ws.readyState!==1)return; inflight=true; b.arrayBuffer().then(buf=>ws.send(buf)); },'image/jpeg',0.65);
@@ -300,8 +314,41 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   function setShow(m){ showMode=m; try{localStorage.setItem('ssl.show',m);}catch(e){} $('showFinal').setAttribute('aria-pressed',m==='final'); $('showLive').setAttribute('aria-pressed',m==='live'); $('rState').hidden=m!=='final'; clearCard(); }
   $('showFinal').addEventListener('click',()=>setShow('final')); $('showLive').addEventListener('click',()=>setShow('live'));
   function clearCard(){ $('rWord').textContent='—'; $('rEn').textContent=showMode==='final'?'Your sign will appear here':'Show your hands to the camera'; $('rId').textContent=''; $('rBar').style.width='0'; $('rConf').textContent='confidence'; $('rStable').textContent=''; $('rAlts').innerHTML=''; }
-  let forceEnd=false;
-  $('btnDone').addEventListener('click',()=>{ forceEnd=true; });
+  let forceEnd=false, phoneWs=null;
+  $('btnDone').addEventListener('click',()=>{ if(phoneWs&&phoneWs.readyState===1) phoneWs.send(JSON.stringify({end:true})); else forceEnd=true; });
+
+  // Phone as camera, this laptop as display
+  function showQR(url){
+    $('pairUrl').textContent=url; $('qr').innerHTML='';
+    if(window.QRCode) new QRCode($('qr'),{text:url,width:200,height:200,correctLevel:QRCode.CorrectLevel.M});
+    else $('qr').hidden=true;
+  }
+  let lastBlobUrl=null;
+  function connectDisplay(){
+    const proto=location.protocol==='https:'?'wss':'ws'; phoneWs=new WebSocket(`${proto}://${location.host}/ws_display`); phoneWs.binaryType='arraybuffer';
+    phoneWs.onopen=()=>{ $('cSrv').textContent='waiting for phone'; $('cSrv').classList.add('on'); };
+    phoneWs.onmessage=e=>{
+      if(typeof e.data!=='string'){ // preview JPEG from the phone
+        const u=URL.createObjectURL(new Blob([e.data],{type:'image/jpeg'})); $('phoneView').src=u; if(lastBlobUrl) URL.revokeObjectURL(lastBlobUrl); lastBlobUrl=u;
+        if(!$('pair').hidden){ $('pair').hidden=true; } $('phoneView').hidden=false; $('cCam').textContent='phone camera'; $('cCam').classList.add('on'); return; }
+      const r=JSON.parse(e.data); if(!$('pair').hidden) $('pair').hidden=true; $('cSrv').textContent='phone connected';
+      if(r.lm){ drawPhoneLm(r.lm); r.lm=null; } onResult(r);
+    };
+    phoneWs.onclose=()=>{ $('cSrv').textContent='display disconnected'; $('cSrv').classList.remove('on'); setTimeout(()=>{ if(phoneWs) connectDisplay(); },1500); };
+  }
+  function drawPhoneLm(lm){
+    // landmarks are normalised to the phone frame; map through the preview image's cover crop
+    const img=$('phoneView'); const W=overlay.width=overlay.clientWidth, H=overlay.height=overlay.clientHeight; ctx.clearRect(0,0,W,H);
+    const vw=img.naturalWidth||4, vh=img.naturalHeight||3, s=Math.max(W/vw,H/vh), ox=(W-vw*s)/2, oy=(H-vh*s)/2, P=p=>[ox+p[0]*vw*s, oy+p[1]*vh*s];
+    for(const [pts,col] of [[lm.left||[],'rgba(61,214,140,.95)'],[lm.right||[],'rgba(242,184,59,.95)']]){ if(!pts.length) continue; ctx.strokeStyle=col; ctx.lineWidth=3; HAND_EDGES.forEach(([a,b])=>{ if(!pts[a]||!pts[b])return; const A=P(pts[a]),B=P(pts[b]); ctx.beginPath(); ctx.moveTo(A[0],A[1]); ctx.lineTo(B[0],B[1]); ctx.stroke(); }); }
+  }
+  $('btnPhone').addEventListener('click',async()=>{
+    $('gate').hidden=true; $('pair').hidden=false;
+    try{ const info=await fetch('/api/info').then(r=>r.json()); showQR(info.camera_url); }catch(e){ $('pairUrl').textContent='Could not read the laptop address.'; }
+    if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } if(ws){ ws.onclose=null; ws.close(); ws=null; }
+    connectDisplay();
+  });
+  $('btnPairCancel').addEventListener('click',()=>{ $('pair').hidden=true; $('gate').hidden=false; if(phoneWs){ const w=phoneWs; phoneWs=null; w.onclose=null; w.close(); } });
   setShow(showMode);
   function setState(cls,text){ $('rState').className='state '+cls; $('rStateText').textContent=text; }
   function showFinal(f){
