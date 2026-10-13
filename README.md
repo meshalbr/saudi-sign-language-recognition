@@ -10,9 +10,9 @@ signer's face out of the pipeline.
 
 > Status: day 2. Pipeline, recorder, trainer, ONNX export and live demo are in place and
 > tested (11 tests, CI green). On KArSL-100 (100 signs, 3 signers, 15,117 clips) the
-> 586k-parameter BiGRU reaches **99.6% top-1** on the official split and **76.3% top-1 /
-> 93.6% top-5 leave-one-signer-out** (up from 67.0% with plain features), all trained on the
-> laptop CPU.
+> models reach **99.6% top-1** on the official split and **83.3% top-1 / 96.0% top-5
+> leave-one-signer-out** (a 450k-parameter Transformer; up from 67.0% with the first GRU
+> baseline), all trained on the laptop CPU.
 
 ## Why this matters
 
@@ -49,9 +49,11 @@ webcam / video  ->  MediaPipe Holistic (pose + hands)  ->  155 numbers per frame
 3. **Clips.** A sign is a movement, so clips are resampled to exactly 32 frames. Training
    clips are also mirrored (swapping the left and right hand blocks), sped up or slowed down,
    shifted and jittered.
-4. **Classifier.** A two-layer bidirectional GRU (about 0.5 M weights) reads the 32 x 155
-   table and scores every sign. It trains in minutes and runs in about 3 ms through ONNX
-   Runtime.
+4. **Classifier.** A small sequence model reads the 32-frame table and scores every sign. Two
+   are implemented: a two-layer bidirectional GRU (586k weights) and a two-layer Transformer
+   encoder with a CLS token (450k weights). The Transformer generalises better to new signers
+   and is the default. Both train in under 30 minutes on the laptop CPU and run in a few
+   milliseconds through ONNX Runtime.
 5. **Evaluation.** Two numbers are always reported: the official KArSL split (new recordings
    of the same signers) and a held-out signer (a person the model never saw). The second is
    the honest one and is expected to be lower.
@@ -108,14 +110,16 @@ here as they land.
 | 2026-10-12 | KArSL-100, signer 01, 100 classes | official (800 test clips) | 0.990 | 0.998 | BiGRU, 566k params, trained on the laptop CPU in 37 min. Signer-dependent. |
 | 2026-10-13 | KArSL-100, all 3 signers | official (2,400 test clips) | **0.996** | 1.000 | signer-dependent |
 | 2026-10-13 | KArSL-100, leave-one-signer-out, baseline features | mean of 3 folds (15,117 test clips) | 0.670 | 0.884 | signer-independent: s03 0.683, s02 0.641, s01 0.687 |
-| 2026-10-13 | KArSL-100, leave-one-signer-out, phase-2 features | mean of 3 folds | **0.763** | **0.936** | wrist-local hand coordinates + velocity + hand-block dropout + dropout 0.5: s03 0.794, s02 0.744, s01 0.751 |
+| 2026-10-13 | KArSL-100, leave-one-signer-out, GRU + phase-2 features | mean of 3 folds | 0.778 | 0.946 | wrist-local hand coordinates + velocity + hand-block dropout + dropout 0.5 + weight decay |
+| 2026-10-13 | KArSL-100, leave-one-signer-out, **Transformer** + phase-2 features | mean of 3 folds | **0.833** | **0.960** | 2-layer encoder, 450k params: s03 0.836, s02 0.824, s01 0.840 |
 
 The gap between seen and unseen signers is the project's central finding: the same model is
-near perfect on signers it has seen and far lower on a new person, while top-5 stays above 0.9.
-Validation accuracy hits 1.000 in every fold, so the model memorises signer style. Phase 2
-recovered 9.3 points by removing signer-specific hand geometry (expressing each hand relative to
-its own wrist and hand size) and by regularising harder; see `reports/results.md` for the
-ablation.
+near perfect on signers it has seen and far lower on a new person. Validation accuracy hits
+1.000 in every fold, so the model memorises signer style. Over one day the signer-independent
+number went from 0.670 to 0.833: 9 points from removing signer-specific hand geometry
+(each hand expressed relative to its own wrist and hand size), 1.5 from heavier regularisation,
+and 5.5 from replacing the GRU with a small Transformer encoder. The full ablation is in
+`reports/results.md`.
 
 ## Edge benchmark
 
@@ -124,8 +128,10 @@ Measured on the laptop above, 640x480 input:
 | Stage | p50 | p95 | Notes |
 |---|---|---|---|
 | MediaPipe holistic, per frame | 71 ms | 84 ms | the bottleneck, about 15 FPS |
-| Classifier, PyTorch | 25 ms | 68 ms | |
-| Classifier, ONNX Runtime CPU | 3.3 ms | 12 ms | 2.1 MB model, max output difference vs PyTorch 4.8e-7 |
+| GRU classifier, PyTorch | 25 ms | 68 ms | measured under heavy background load |
+| GRU classifier, ONNX Runtime CPU | 3.3 ms | 12 ms | 2.3 MB model, parity vs PyTorch 1e-6 |
+| Transformer classifier, PyTorch | 3.0 ms | 3.7 ms | |
+| Transformer classifier, ONNX Runtime CPU | **1.6 ms** | 2.1 ms | 2.0 MB model, parity vs PyTorch 2e-6 |
 
 Planned: lower capture resolution, INT8 quantisation, DirectML on the integrated GPU.
 
@@ -133,8 +139,9 @@ Planned: lower capture resolution, INT8 quantisation, DirectML on the integrated
 
 1. ~~Baseline GRU on KArSL-100, signer 01, official split~~ done, 0.990
 2. ~~Signer-independent evaluation across all three signers~~ done, 0.670 mean top-1
-3. Close the signer gap: ~~hand-scale normalisation, velocity features, hand-block dropout~~
-   done, 0.670 to 0.763; next stronger regularisation on all folds and a Transformer comparison
+3. ~~Close the signer gap: hand-scale normalisation, velocity, hand-block dropout, stronger
+   regularisation, Transformer comparison~~ done, 0.670 to 0.833. Next: longer schedule, more
+   augmentation, test-time mirroring
 4. All 502 KArSL signs
 5. ONNX INT8 and DirectML benchmark chapter
 6. Live demo with sign-boundary detection

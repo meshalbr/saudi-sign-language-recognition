@@ -44,7 +44,25 @@ Stronger regularisation ("strong": hand_drop 0.3, weight_decay 1e-3, checkpoint 
 | 2026-10-13 | s02 | BiGRU 2x128 | 586k | 28 min | 0.759 | 0.946 | 1.04 |
 | 2026-10-13 | s02 | Transformer 2 layers, dim 128, 4 heads, CLS token | 450k | 24 min | **0.824** | **0.961** | 0.67 |
 
-The Transformer beats the GRU by 6.5 points on the hardest fold with fewer parameters and lower test loss, which means better-calibrated confidence as well as more correct answers. It is being run on the other two folds to confirm.
+Transformer on all folds:
+
+| Date | Fold | GRU strong top-1 | Transformer top-1 | Transformer top-5 | Test loss |
+|---|---|---|---|---|---|
+| 2026-10-13 | s03 | 0.804 | **0.836** | 0.959 | 0.65 |
+| 2026-10-13 | s02 | 0.759 | **0.824** | 0.961 | 0.67 |
+| 2026-10-13 | s01 | 0.770 | **0.840** | 0.960 | 0.66 |
+| 2026-10-13 | mean | 0.778 | **0.833** | **0.960** | |
+
+The Transformer beats the GRU on every fold, by 5.5 points on average, with fewer parameters (450k vs 586k), faster training (24 vs 28 min) and much lower test loss (0.66 vs about 1.0), which means its confidence is better calibrated. Its best epochs are 38 to 40, so it was still improving at the end of the schedule; a longer schedule is a cheap next experiment. Final signer-independent result for KArSL-100 after one day of work: **0.833 top-1 / 0.960 top-5**, from 0.670 / 0.884 with the first baseline.
+
+## Summary of the signer-gap work
+
+| Step | Mean LOSO top-1 | Gain |
+|---|---|---|
+| GRU, plain 155-d landmarks | 0.670 | |
+| + wrist-local hands, velocity, hand-block dropout, dropout 0.5 | 0.763 | +9.3 |
+| + hand_drop 0.3, weight decay 1e-3, val-loss tie-break | 0.778 | +1.5 |
+| Transformer encoder instead of GRU | 0.833 | +5.5 |
 
 Reading: removing each signer's hand size and proportions (hand-local) is the single biggest win. Velocity alone is noise, but it does not hurt when combined. Regularisation (dropout 0.5 and simulated missing hands) adds another 4 to 5 points, which fits the diagnosis of signer memorisation. Known weakness of the protocol: validation top-1 saturates at 1.000 by epoch 15 in every run, so "best checkpoint by validation" is effectively arbitrary; selection by validation loss or a fixed final epoch is the next protocol fix.
 
@@ -57,3 +75,5 @@ Reading of phase 1: with the signer seen in training the model is near perfect; 
 | 2026-10-12 | MediaPipe holistic, 640x480 | 71 ms | 84 ms | idle machine |
 | 2026-10-12 | BiGRU classifier, PyTorch | 25 ms | 68 ms | measured while 3 extraction workers ran |
 | 2026-10-12 | BiGRU classifier, ONNX Runtime CPU | 3.3 ms | 12 ms | same conditions, 2.1 MB model, parity 4.8e-7 |
+| 2026-10-13 | Transformer classifier, PyTorch | 3.0 ms | 3.7 ms | one training run in the background |
+| 2026-10-13 | Transformer classifier, ONNX Runtime CPU | 1.6 ms | 2.1 ms | 1.98 MB model, parity 1.7e-6 |
