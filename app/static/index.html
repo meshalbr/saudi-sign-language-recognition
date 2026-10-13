@@ -66,6 +66,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
 .muted{color:var(--muted);font-size:13px}
 .ref{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .ref .refvid,.ref .refcv{width:100%;aspect-ratio:1;border-radius:10px;background:#000;object-fit:cover}
+.ref .refvid{background-repeat:no-repeat;background-size:auto 100%;background-position:0 0}
 .ref .refcv{background:var(--panel2)}
 .row{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
 [hidden]{display:none!important}
@@ -115,7 +116,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
       <div class="target" id="pAr">—</div>
       <div class="en" id="pEn"></div>
       <div class="id" id="pId"></div>
-      <div class="ref" id="pRef"><video class="refvid" id="pVid" muted loop playsinline></video><canvas class="refcv" id="pCv" width="240" height="240"></canvas></div>
+      <div class="ref" id="pRef"><div class="refvid" id="pVid"></div><canvas class="refcv" id="pCv" width="240" height="240"></canvas></div>
       <div class="muted">Left: reference recording. Right: the hand movement the model sees.</div>
       <div class="status" id="pStatus">Waiting…</div>
       <div class="bar"><i id="pBar"></i></div>
@@ -127,7 +128,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
 
     <div class="card" id="tabWords" hidden>
       <input class="search" id="search" placeholder="Search Arabic, English or ID…" autocomplete="off">
-      <div class="ref" id="wRef" hidden><video class="refvid" id="wVid" muted loop playsinline></video><canvas class="refcv" id="wCv" width="240" height="240"></canvas></div>
+      <div class="ref" id="wRef" hidden><div class="refvid" id="wVid"></div><canvas class="refcv" id="wCv" width="240" height="240"></canvas></div>
       <div class="row" id="wRow" hidden><span class="muted" id="wName"></span><button class="btn" id="btnPractiseThis">Practise this</button></div>
       <div class="list" id="list"></div>
       <div class="muted">Tap a word to see how it is signed.</div>
@@ -166,8 +167,17 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
 
   // Reference clip: real video + animated skeleton of the landmarks the model sees
   const anims={};
+  const SPRITE_FRAMES=24, SPRITE_FPS=15;
   function showReference(id,vid,cv){
-    vid.src=`/api/clip/${id}`; vid.play().catch(()=>{});
+    // Reference recording as a JPEG strip (codec-free), animated by stepping background-position.
+    if(anims[vid.id]) cancelAnimationFrame(anims[vid.id]);
+    const img=new Image(); img.onload=()=>{
+      vid.style.backgroundImage=`url("${img.src}")`;
+      const fw=img.naturalWidth/SPRITE_FRAMES, fh=img.naturalHeight; const t0=performance.now();
+      function step(now){ const i=Math.floor((now-t0)/1000*SPRITE_FPS)%SPRITE_FRAMES; const box=vid.clientHeight; const s=box/fh; vid.style.backgroundSize=`${img.naturalWidth*s}px ${box}px`; vid.style.backgroundPosition=`-${i*fw*s}px 0`; anims[vid.id]=requestAnimationFrame(step); }
+      anims[vid.id]=requestAnimationFrame(step);
+    };
+    img.src=`/api/sprite/${id}`;
     if(anims[cv.id]) cancelAnimationFrame(anims[cv.id]);
     fetch(`/api/ref/${id}`).then(r=>r.ok?r.json():null).then(ref=>{ if(!ref)return; animateSkeleton(cv,ref); }).catch(()=>{});
   }

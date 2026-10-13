@@ -96,6 +96,47 @@ def reference(sid: str):
     return JSONResponse({"id": sid, "fps": 30, "frames": frames})
 
 
+SPRITE_FRAMES, SPRITE_H = 24, 180
+
+
+@app.get("/api/sprite/{sid}")
+def sprite(sid: str):
+    """Reference clip rendered once into a horizontal strip of JPEG frames (codec-free playback)."""
+    dest = Path("data/sprites") / f"{sid}.jpg"
+    if not dest.exists():
+        f = _reference_file(sid, ".mp4", "data/videos")
+        if f is None:
+            return JSONResponse({"error": "no video"}, status_code=404)
+        cap = cv2.VideoCapture(str(f))
+        frames = []
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            frames.append(frame)
+        cap.release()
+        if not frames:
+            return JSONResponse({"error": "unreadable video"}, status_code=500)
+        idx = np.linspace(0, len(frames) - 1, SPRITE_FRAMES).astype(int)
+        fh, fw = frames[0].shape[:2]
+        side = min(fh, fw)  # centre square crop: the signer stands in the middle of the frame
+        x0, y0 = (fw - side) // 2, (fh - side) // 2
+        strip = np.concatenate(
+            [
+                cv2.resize(
+                    frames[i][y0 : y0 + side, x0 : x0 + side],
+                    (SPRITE_H, SPRITE_H),
+                    interpolation=cv2.INTER_AREA,
+                )
+                for i in idx
+            ],
+            axis=1,
+        )
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(dest), strip, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    return FileResponse(dest, media_type="image/jpeg", headers={"X-Frames": str(SPRITE_FRAMES)})
+
+
 @app.get("/api/clip/{sid}")
 def clip(sid: str):
     """Reference video (H.264 mp4) of one sign, when the KArSL videos are present locally."""
