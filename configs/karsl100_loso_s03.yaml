@@ -1,4 +1,4 @@
-# KArSL-100, signer 01 only, official train/test split (signer-dependent baseline)
+# KArSL-100, leave-one-signer-out: train on two signers, test on the third (signer-independent)
 data_dir: data/landmarks
 official_split: false
 seq_len: 32
