@@ -43,6 +43,17 @@ class GRUClassifier(nn.Module):
 def build_model(cfg: dict, num_classes: int) -> nn.Module:
     from .features import feature_dim
 
+    if str(cfg.get("model", "gru")).lower() == "transformer":
+        from .model_transformer import TransformerClassifier
+
+        return TransformerClassifier(
+            num_classes=num_classes,
+            in_dim=feature_dim(cfg),
+            dim=int(cfg.get("hidden", 128)),
+            heads=int(cfg.get("heads", 4)),
+            layers=int(cfg.get("layers", 2)),
+            dropout=float(cfg.get("dropout", 0.3)),
+        )
     return GRUClassifier(
         num_classes=num_classes,
         in_dim=feature_dim(cfg),

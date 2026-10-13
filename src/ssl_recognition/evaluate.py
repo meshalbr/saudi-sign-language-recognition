@@ -34,10 +34,19 @@ def confusion(logits: np.ndarray, targets: np.ndarray, num_classes: int) -> np.n
     return cm
 
 
+def mean_cross_entropy(logits: np.ndarray, targets: np.ndarray) -> float:
+    if len(targets) == 0:
+        return 0.0
+    z = logits - logits.max(axis=1, keepdims=True)
+    logp = z - np.log(np.exp(z).sum(axis=1, keepdims=True))
+    return float(-logp[np.arange(len(targets)), targets].mean())
+
+
 def evaluate(model, loader) -> dict:
     logits, targets = predict_all(model, loader)
     return {
         "top1": topk_accuracy(logits, targets, 1),
         "top5": topk_accuracy(logits, targets, 5),
+        "loss": mean_cross_entropy(logits, targets),
         "n": int(len(targets)),
     }

@@ -71,6 +71,7 @@ def train(cfg: dict, test_signer: str | None = None) -> dict:
     loss_fn = nn.CrossEntropyLoss(label_smoothing=0.1)
 
     best_top1, best_epoch = -1.0, -1
+    best_key = (-1.0, float("-inf"))
     history = []
     t0 = time.time()
     for epoch in range(1, epochs + 1):
@@ -85,15 +86,20 @@ def train(cfg: dict, test_signer: str | None = None) -> dict:
             sched.step()
             total += loss.item() * len(y)
             n += len(y)
-        val_metrics = evaluate(model, val_dl) if len(val_ds) else {"top1": 0.0, "top5": 0.0}
+        val_metrics = (
+            evaluate(model, val_dl) if len(val_ds) else {"top1": 0.0, "top5": 0.0, "loss": 0.0}
+        )
         rec = {"epoch": epoch, "train_loss": total / max(1, n), **val_metrics}
         history.append(rec)
         print(
             f"epoch {epoch:3d} loss {rec['train_loss']:.4f} "
-            f"val top1 {rec['top1']:.3f} top5 {rec['top5']:.3f}"
+            f"val top1 {rec['top1']:.3f} top5 {rec['top5']:.3f} vloss {rec['loss']:.4f}"
         )
-        if rec["top1"] > best_top1:
-            best_top1, best_epoch = rec["top1"], epoch
+        # Validation top-1 saturates at 1.0 on same-signer validation, so break ties with the
+        # validation loss: a more confident, better-calibrated model generalises better.
+        key = (rec["top1"], -rec["loss"])
+        if key > best_key:
+            best_key, best_top1, best_epoch = key, rec["top1"], epoch
             torch.save(
                 {"state_dict": model.state_dict(), "cfg": cfg, "num_classes": len(label_map)},
                 out_dir / "best.pt",

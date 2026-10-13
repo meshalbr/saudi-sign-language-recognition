@@ -19,6 +19,17 @@
 | 2026-10-13 | p2_s02_handlocal_vel | hand-local + velocity | 0.697 | 0.904 | +5.6 |
 | 2026-10-13 | p2_s02_full | hand-local + velocity + hand-block dropout 0.15 + dropout 0.5 | **0.744** | **0.932** | **+10.3** |
 
+Full recipe on all folds (leave-one-signer-out):
+
+| Date | Fold (test signer) | Baseline top-1 | Full recipe top-1 | Full recipe top-5 |
+|---|---|---|---|---|
+| 2026-10-13 | s03 | 0.683 | **0.794** | 0.945 |
+| 2026-10-13 | s02 | 0.641 | **0.744** | 0.932 |
+| 2026-10-13 | s01 | 0.687 | **0.751** | 0.932 |
+| 2026-10-13 | mean | 0.670 | **0.763** | 0.936 |
+
+Stronger regularisation (hand_drop 0.3, weight_decay 1e-3) on s02: **0.759 / 0.946** (+1.5 over the full recipe). Next batch runs it on all folds together with a Transformer comparison.
+
 Reading: removing each signer's hand size and proportions (hand-local) is the single biggest win. Velocity alone is noise, but it does not hurt when combined. Regularisation (dropout 0.5 and simulated missing hands) adds another 4 to 5 points, which fits the diagnosis of signer memorisation. Known weakness of the protocol: validation top-1 saturates at 1.000 by epoch 15 in every run, so "best checkpoint by validation" is effectively arbitrary; selection by validation loss or a fixed final epoch is the next protocol fix.
 
 Reading of phase 1: with the signer seen in training the model is near perfect; with a new signer it drops to two thirds top-1 while top-5 stays near 0.9. Validation (same signers as train) reaches 1.000 in every fold, so the model memorises signer style. Next experiments target that gap: stronger spatial augmentation, hand-scale normalisation, velocity features, dropout on whole hand blocks, and a Transformer comparison.
