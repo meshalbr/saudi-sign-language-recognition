@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ssl_recognition.landmarks import FEATURE_DIM
+from ssl_recognition.features import feature_dim
 from ssl_recognition.model import build_model
 
 
@@ -20,7 +20,8 @@ def export(run_dir: Path) -> Path:
     model = build_model(ckpt["cfg"], ckpt["num_classes"]).eval()
     model.load_state_dict(ckpt["state_dict"])
     seq_len = int(ckpt["cfg"].get("seq_len", 32))
-    dummy = torch.zeros(1, seq_len, FEATURE_DIM)
+    in_dim = feature_dim(ckpt["cfg"])
+    dummy = torch.zeros(1, seq_len, in_dim)
     dest = run_dir / "model.onnx"
     torch.onnx.export(
         model,
@@ -35,7 +36,7 @@ def export(run_dir: Path) -> Path:
     import onnxruntime as ort
 
     sess = ort.InferenceSession(str(dest), providers=["CPUExecutionProvider"])
-    x = np.random.RandomState(0).randn(2, seq_len, FEATURE_DIM).astype(np.float32)
+    x = np.random.RandomState(0).randn(2, seq_len, in_dim).astype(np.float32)
     with torch.no_grad():
         ref = model(torch.from_numpy(x)).numpy()
     out = sess.run(None, {"features": x})[0]

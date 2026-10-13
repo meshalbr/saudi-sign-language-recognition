@@ -41,8 +41,11 @@ class GRUClassifier(nn.Module):
 
 
 def build_model(cfg: dict, num_classes: int) -> nn.Module:
+    from .features import feature_dim
+
     return GRUClassifier(
         num_classes=num_classes,
+        in_dim=feature_dim(cfg),
         hidden=int(cfg.get("hidden", 128)),
         layers=int(cfg.get("layers", 2)),
         dropout=float(cfg.get("dropout", 0.3)),

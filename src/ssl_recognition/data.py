@@ -17,7 +17,14 @@ from pathlib import Path
 
 import numpy as np
 
-from .landmarks import FEATURE_DIM, mirror_features
+from .landmarks import (
+    FEATURE_DIM,
+    LEFT_FLAG,
+    LEFT_SLICE,
+    RIGHT_FLAG,
+    RIGHT_SLICE,
+    mirror_features,
+)
 
 
 @dataclass
@@ -60,11 +67,17 @@ def resample(x: np.ndarray, seq_len: int) -> np.ndarray:
     return (x[lo] * (1 - w) + x[hi] * w).astype(np.float32)
 
 
-def augment(x: np.ndarray, rng: random.Random) -> np.ndarray:
-    """Random mirror, time-scale, scale, shift and jitter for one (T, D) clip."""
+def augment(x: np.ndarray, rng: random.Random, hand_drop: float = 0.0) -> np.ndarray:
+    """Random mirror, time-scale, scale, shift, jitter and optional hand-block dropout."""
     y = x
     if rng.random() < 0.5:
         y = mirror_features(y)
+    if hand_drop > 0 and rng.random() < hand_drop:
+        # Simulate a missed hand: zero one hand block and its presence flag for the clip.
+        y = y.copy()
+        blk, flag = (LEFT_SLICE, LEFT_FLAG) if rng.random() < 0.5 else (RIGHT_SLICE, RIGHT_FLAG)
+        y[:, blk] = 0.0
+        y[:, flag] = 0.0
     # Temporal crop / stretch: keep 70-100% of the clip, random start.
     t = len(y)
     keep = max(4, int(t * rng.uniform(0.7, 1.0)))
@@ -151,12 +164,15 @@ class ClipDataset:
         seq_len: int,
         train: bool = False,
         seed: int = 0,
+        cfg: dict | None = None,
     ):
         self.clips = clips
         self.label_map = label_map
         self.seq_len = seq_len
         self.train = train
         self.rng = random.Random(seed)
+        self.cfg = cfg or {}
+        self.hand_drop = float(self.cfg.get("hand_drop", 0.0))
 
     def __len__(self) -> int:
         return len(self.clips)
@@ -164,7 +180,9 @@ class ClipDataset:
     def __getitem__(self, i: int):
         import torch
 
+        from .features import transform
+
         c = self.clips[i]
-        x = augment(c.x, self.rng) if self.train else c.x
-        x = resample(x, self.seq_len)
+        x = augment(c.x, self.rng, self.hand_drop) if self.train else c.x
+        x = transform(resample(x, self.seq_len), self.cfg)
         return torch.from_numpy(x), self.label_map[c.label]

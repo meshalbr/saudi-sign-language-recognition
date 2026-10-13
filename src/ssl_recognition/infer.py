@@ -19,12 +19,15 @@ import cv2
 import numpy as np
 
 from .data import load_labels, resample
+from .features import transform
 from .landmarks import HolisticExtractor, draw_result
 
 
 class Predictor:
     def __init__(self, run_dir: Path, use_onnx: bool = False, names: Path | None = None):
         self.labels = load_labels(run_dir / "labels.json")
+        cfg_path = run_dir / "config.json"
+        self.cfg = json.loads(cfg_path.read_text(encoding="utf-8")) if cfg_path.exists() else {}
         if names is not None and Path(names).exists():
             # Optional display names, e.g. data/karsl_labels.json: {"0071": {"ar":..., "en":...}}
             table = json.loads(Path(names).read_text(encoding="utf-8"))
@@ -55,7 +58,7 @@ class Predictor:
 
     def predict(self, x: np.ndarray) -> np.ndarray:
         """x: (T, D) -> softmax probabilities over labels."""
-        x = resample(x, self.seq_len)[None]
+        x = transform(resample(x, self.seq_len), self.cfg)[None]
         if self.use_onnx:
             logits = self.sess.run(None, {self.input_name: x})[0][0]
         else:

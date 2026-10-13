@@ -48,8 +48,11 @@ def train(cfg: dict, test_signer: str | None = None) -> dict:
     )
     save_labels(out_dir / "labels.json", label_map)
 
-    train_ds = ClipDataset(train_clips, label_map, seq_len, train=bool(cfg.get("augment", True)))
-    val_ds = ClipDataset(val_clips, label_map, seq_len)
+    (out_dir / "config.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    train_ds = ClipDataset(
+        train_clips, label_map, seq_len, train=bool(cfg.get("augment", True)), cfg=cfg
+    )
+    val_ds = ClipDataset(val_clips, label_map, seq_len, cfg=cfg)
     bs = int(cfg.get("batch_size", 32))
     train_dl = DataLoader(train_ds, batch_size=bs, shuffle=True, drop_last=False)
     val_dl = DataLoader(val_ds, batch_size=bs)
@@ -105,7 +108,7 @@ def train(cfg: dict, test_signer: str | None = None) -> dict:
     if test_clips:
         ckpt = torch.load(out_dir / "best.pt", map_location="cpu")
         model.load_state_dict(ckpt["state_dict"])
-        test_dl = DataLoader(ClipDataset(test_clips, label_map, seq_len), batch_size=bs)
+        test_dl = DataLoader(ClipDataset(test_clips, label_map, seq_len, cfg=cfg), batch_size=bs)
         result["test"] = evaluate(model, test_dl)
     (out_dir / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(json.dumps(result, indent=2))
