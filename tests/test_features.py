@@ -68,3 +68,12 @@ def test_fill_gaps_interpolates_short_gaps_only():
     assert np.allclose(y[5:8, RIGHT_SLICE.start], [5, 6, 7])
     assert (y[10:, RIGHT_FLAG] == 0).all()
     assert not y[:, LEFT_FLAG].any()
+
+
+def test_augment_keeps_absent_hands_exactly_zero():
+    x = _clip(t=30)  # left hand present, right hand absent
+    for seed in range(20):
+        y = augment(x, random.Random(seed), hand_drop=0.5)
+        for blk, flag in ((LEFT_SLICE, LEFT_FLAG), (RIGHT_SLICE, RIGHT_FLAG)):
+            absent = y[:, flag] <= 0
+            assert not y[absent][:, blk].any()

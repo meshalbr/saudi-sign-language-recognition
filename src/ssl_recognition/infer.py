@@ -53,6 +53,7 @@ class Predictor:
             self.model = build_model(ckpt["cfg"], ckpt["num_classes"])
             self.model.load_state_dict(ckpt["state_dict"])
             self.model.eval()
+            self.cfg = dict(ckpt["cfg"])  # the checkpoint's own config is authoritative
             self.seq_len = int(ckpt["cfg"].get("seq_len", 32))
             self._torch = torch
 
@@ -166,7 +167,7 @@ def main() -> None:
             ok, frame = cap.read()
             if not ok:
                 break
-            frame = cv2.flip(frame, 1)
+            # Landmark the raw frame (KArSL videos are not mirrored); mirror for display only.
             feat = ex.process(frame, int((time.time() - t_start) * 1000))
             hands_now = int(feat[-2] + feat[-1])
             buf.append(feat)
@@ -180,6 +181,7 @@ def main() -> None:
                 else:
                     top = []
             draw_result(frame, ex.last_result)
+            frame = cv2.flip(frame, 1)
             fps_n += 1
             if time.time() - fps_t >= 1.0:
                 fps, fps_n, fps_t = fps_n / (time.time() - fps_t), 0, time.time()

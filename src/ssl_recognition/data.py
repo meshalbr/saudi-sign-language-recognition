@@ -83,6 +83,7 @@ def augment(x: np.ndarray, rng: random.Random, hand_drop: float = 0.0) -> np.nda
     keep = max(4, int(t * rng.uniform(0.7, 1.0)))
     start = rng.randint(0, t - keep)
     y = y[start : start + keep]
+    x_pose_present = np.abs(y[:, :27]).sum(axis=1) > 0
     # Spatial scale and shift on coordinate blocks (not on the two presence flags).
     coords = y[:, : FEATURE_DIM - 2]
     scale = rng.uniform(0.9, 1.1)
@@ -92,6 +93,10 @@ def augment(x: np.ndarray, rng: random.Random, hand_drop: float = 0.0) -> np.nda
         coords + rng.gauss(0, 1) * 0.0 + np.random.normal(0, 0.01, coords.shape).astype(np.float32)
     )
     y = np.concatenate([coords.reshape(len(y), -1), y[:, FEATURE_DIM - 2 :]], axis=1)
+    # Absent hands and frames without a pose are exactly zero at inference; keep them zero here.
+    y[y[:, LEFT_FLAG] <= 0, LEFT_SLICE] = 0.0
+    y[y[:, RIGHT_FLAG] <= 0, RIGHT_SLICE] = 0.0
+    y[~x_pose_present, :27] = 0.0
     return y.astype(np.float32)
 
 

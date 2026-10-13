@@ -43,9 +43,10 @@ def main() -> None:
             ok, frame = cap.read()
             if not ok:
                 break
-            frame = cv2.flip(frame, 1)
+            # Landmark the raw frame (training videos are not mirrored); mirror only for display.
             feat = ex.process(frame, int((time.time() - t_start) * 1000))
             draw_result(frame, ex.last_result)
+            frame = cv2.flip(frame, 1)
             cv2.putText(
                 frame,
                 f"{args.label}  clip {recorded + 1}/{args.clips}  SPACE=record  Q=quit",
@@ -82,9 +83,9 @@ def main() -> None:
                 ok, frame = cap.read()
                 if not ok:
                     break
-                frame = cv2.flip(frame, 1)
                 feats.append(ex.process(frame, int((time.time() - t_start) * 1000)))
                 draw_result(frame, ex.last_result)
+                frame = cv2.flip(frame, 1)
                 cv2.putText(
                     frame,
                     f"REC {len(feats)}/{args.frames}",

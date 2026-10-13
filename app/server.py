@@ -12,9 +12,11 @@ accept the browser warning once.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import collections
 import json
 import socket
+import threading
 import time
 from pathlib import Path
 
@@ -46,7 +48,15 @@ def load_names(path: Path | None, labels: list[str]) -> list[dict]:
     return out
 
 
+_PRED_LOCK = threading.Lock()
+
+
 def predictor() -> Predictor:
+    with _PRED_LOCK:
+        return _predictor_locked()
+
+
+def _predictor_locked() -> Predictor:
     if "predictor" not in STATE:
         STATE["predictor"] = Predictor(Path(STATE["run"]), use_onnx=True)
         STATE["labels"] = load_names(STATE["names"], STATE["predictor"].labels)
@@ -65,6 +75,11 @@ def index():
 def labels():
     predictor()
     return JSONResponse(STATE["labels"])
+
+
+def _valid_sid(sid: str) -> bool:
+    predictor()
+    return sid in {lab["id"] for lab in STATE["labels"]}
 
 
 def _coverage(npz: Path) -> float:
@@ -103,6 +118,8 @@ def _reference_file(sid: str, suffix: str, folder: str) -> Path | None:
 @app.get("/api/ref/{sid}")
 def reference(sid: str):
     """Landmark sequence of one reference clip, for the skeleton animation in the UI."""
+    if not _valid_sid(sid):
+        return JSONResponse({"error": "unknown sign"}, status_code=404)
     f = _reference_file(sid, ".npz", "data/landmarks")
     if f is None:
         return JSONResponse({"error": "no reference clip"}, status_code=404)
@@ -131,6 +148,8 @@ SPRITE_FRAMES, SPRITE_H = 24, 180
 @app.get("/api/sprite/{sid}")
 def sprite(sid: str):
     """Reference clip rendered once into a horizontal strip of JPEG frames (codec-free playback)."""
+    if not _valid_sid(sid):
+        return JSONResponse({"error": "unknown sign"}, status_code=404)
     dest = Path("data/sprites") / f"{sid}_{_best_reference_stem(sid)}.jpg"
     if not dest.exists():
         f = _reference_file(sid, ".mp4", "data/videos")
@@ -169,6 +188,8 @@ def sprite(sid: str):
 @app.get("/api/clip/{sid}")
 def clip(sid: str):
     """Reference video (H.264 mp4) of one sign, when the KArSL videos are present locally."""
+    if not _valid_sid(sid):
+        return JSONResponse({"error": "unknown sign"}, status_code=404)
     f = _reference_file(sid, ".mp4", "data/videos")
     if f is None:
         return JSONResponse({"error": "no video"}, status_code=404)
@@ -215,17 +236,20 @@ class Segmenter:
     below the line or out of view for ``gap_ms``. Short drop-outs inside a sign, such as the pause
     between the two movements of "skull", stay inside the sign. Done ends it immediately."""
 
-    def __init__(self, gap_ms: float = 700, min_len: int = 8, max_len: int = 180, rest_y=REST_Y):
-        self.gap_ms, self.min_len, self.max_len, self.rest_y = gap_ms, min_len, max_len, rest_y
+    def __init__(self, gap_ms: float = 700, min_len: int = 8, max_ms: float = 6000, rest_y=REST_Y):
+        self.gap_ms, self.min_len, self.max_ms, self.rest_y = gap_ms, min_len, max_ms, rest_y
         self.seg: list[np.ndarray] = []
+        self.start_ms: float | None = None
         self.last_active_ms: float | None = None
         self.last: np.ndarray | None = None  # last completed sign, for saving user examples
 
     def push(self, feat: np.ndarray, t_ms: float) -> np.ndarray | None:
         if is_active(feat, self.rest_y):
+            if not self.seg:
+                self.start_ms = t_ms
             self.seg.append(feat)
             self.last_active_ms = t_ms
-            if len(self.seg) >= self.max_len:
+            if self.start_ms is not None and t_ms - self.start_ms >= self.max_ms:
                 return self.flush()
         elif self.seg:
             self.seg.append(feat)
@@ -234,13 +258,12 @@ class Segmenter:
         return None
 
     def flush(self) -> np.ndarray | None:
-        seg, self.seg, self.last_active_ms = self.seg, [], None
+        seg, self.seg, self.last_active_ms, self.start_ms = self.seg, [], None, None
         while seg and not is_active(seg[-1], self.rest_y):  # trim the lowering at the end
             seg.pop()
         if len(seg) < self.min_len:
             return None
         self.last = np.stack(seg)
-        LAST_SIGN["x"] = self.last
         return self.last
 
 
@@ -289,7 +312,7 @@ RELAY: dict = {"end": False}
 async def broadcast_text(msg: dict) -> None:
     dead = []
     data = json.dumps(msg)
-    for d in DISPLAYS:
+    for d in list(DISPLAYS):
         try:
             await d.send_text(data)
         except Exception:  # noqa: BLE001 - a closed display must not break the camera
@@ -300,7 +323,7 @@ async def broadcast_text(msg: dict) -> None:
 
 async def broadcast_bytes(data: bytes) -> None:
     dead = []
-    for d in DISPLAYS:
+    for d in list(DISPLAYS):
         try:
             await d.send_bytes(data)
         except Exception:  # noqa: BLE001
@@ -312,9 +335,9 @@ async def broadcast_bytes(data: bytes) -> None:
 class Session:
     """Per-connection state: rolling window for live guesses + segmenter for final answers."""
 
-    def __init__(self, gap_ms: float = 700):
-        self.pred = predictor()
-        self.names = STATE["labels"]
+    def __init__(self, gap_ms: float = 700, relay: bool = False):
+        predictor()
+        self.relay = relay
         self.buf: collections.deque = collections.deque(maxlen=STATE["window"])
         self.seg = Segmenter(gap_ms=gap_ms)
         self.frame_i = 0
@@ -327,7 +350,7 @@ class Session:
             x = np.stack(self.buf)
             ok = (x[:, -2] + x[:, -1] > 0).mean() > 0.5
             self.top = top3(predictor(), STATE["labels"], x) if ok else []
-        if RELAY["end"]:
+        if self.relay and RELAY["end"]:  # Done pressed on the laptop display
             RELAY["end"], end = False, True
         done = self.seg.flush() if end else self.seg.push(feat, t_ms)
         out = {"top": self.top, "hands": int(feat[-2] + feat[-1]), "recording": len(self.seg.seg)}
@@ -336,6 +359,7 @@ class Session:
             out["final"] = final
             out["final_frames"] = int(span[1] - span[0])
             out["final_span"] = [int(span[0]), int(span[1]), int(len(done))]
+            LAST_SIGN["x"] = done[span[0] : span[1]]  # what teach mode saves
         return out
 
 
@@ -344,8 +368,8 @@ async def ws_feat(websocket: WebSocket):
     """Fast path: the browser runs MediaPipe and sends feature rows (text). It may also send small
     JPEG preview frames (binary), which are relayed to laptop displays."""
     await websocket.accept()
-    sess = Session()
     relay = websocket.query_params.get("role") == "camera"
+    sess = Session(relay=relay)
     try:
         while True:
             m = await websocket.receive()
@@ -363,7 +387,7 @@ async def ws_feat(websocket: WebSocket):
             if feat.shape != (155,):
                 feat = np.zeros(155, np.float32)
             t_ms = float(msg.get("t", time.time() * 1000))
-            out = sess.step(feat, t_ms, end=bool(msg.get("end")))
+            out = await asyncio.to_thread(sess.step, feat, t_ms, bool(msg.get("end")))
             out["ms"] = round((time.perf_counter() - t) * 1000, 1)
             await websocket.send_text(json.dumps(out))
             if relay and DISPLAYS:
@@ -376,8 +400,8 @@ async def ws_feat(websocket: WebSocket):
 async def ws(websocket: WebSocket):
     """Server path: the browser sends JPEG frames; MediaPipe runs here."""
     await websocket.accept()
-    sess = Session()
     relay = websocket.query_params.get("role") == "camera"
+    sess = Session(relay=relay)
     t0 = time.time()
     with HolisticExtractor() as ex:
         try:
@@ -391,17 +415,26 @@ async def ws(websocket: WebSocket):
                         sess.seg.gap_ms = float(msg["gap_ms"])
                     if not msg.get("end"):
                         continue
-                    out = sess.step(np.zeros(155, np.float32), time.time() * 1000, end=True)
+                    out = await asyncio.to_thread(
+                        sess.step, np.zeros(155, np.float32), time.time() * 1000, True
+                    )
                     out["lm"] = {"pose": [], "left": [], "right": []}
                 else:
                     data = m["bytes"]
                     t = time.perf_counter()
-                    frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
-                    if frame is None:
+
+                    def work(data=data):
+                        frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+                        if frame is None:
+                            return None
+                        feat = ex.process(frame, int((time.time() - t0) * 1000))
+                        res = sess.step(feat, time.time() * 1000)
+                        res["lm"] = landmarks_payload(ex.last_result)
+                        return res
+
+                    out = await asyncio.to_thread(work)
+                    if out is None:
                         continue
-                    feat = ex.process(frame, int((time.time() - t0) * 1000))
-                    out = sess.step(feat, time.time() * 1000)
-                    out["lm"] = landmarks_payload(ex.last_result)
                     out["ms"] = round((time.perf_counter() - t) * 1000, 1)
                     if relay and DISPLAYS:
                         await broadcast_bytes(data)
@@ -458,6 +491,8 @@ def personalise_start():
     from app import personalise
 
     base = Path(STATE.get("base_run") or STATE["run"])
+    if "personal" in str(base):
+        base = Path("runs/final_v2")
     STATE["base_run"] = str(base)
 
     def swap(run: Path):

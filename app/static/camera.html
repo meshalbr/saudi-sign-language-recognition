@@ -60,11 +60,13 @@ async function loadLandmarker(){
 function feats(res){
   const f=new Float32Array(155); const pose=res.poseLandmarks&&res.poseLandmarks[0];
   if(!pose||pose.length<33) return {f,lm:{pose:[],left:[],right:[]}};
-  const l=pose[11],r=pose[12],cx=(l.x+r.x)/2,cy=(l.y+r.y)/2,cz=(l.z+r.z)/2; let s=Math.hypot(l.x-r.x,l.y-r.y); if(!(s>1e-3)) s=1;
-  POSE_IDX.forEach((pi,k)=>{const p=pose[pi]; f[k*3]=(p.x-cx)/s; f[k*3+1]=(p.y-cy)/s; f[k*3+2]=(p.z-cz)/s;});
+  // Convert to the 16:9 training aspect (KArSL is 1920x1080): x and z scale by aspect/(16/9).
+  const ka=((video.videoWidth||16)/(video.videoHeight||9))/(16/9), X=p=>p.x*ka, Y=p=>p.y, Z=p=>p.z*ka;
+  const l=pose[11],r=pose[12],cx=(X(l)+X(r))/2,cy=(Y(l)+Y(r))/2,cz=(Z(l)+Z(r))/2; let s=Math.hypot(X(l)-X(r),Y(l)-Y(r)); if(!(s>1e-3)) s=1;
+  POSE_IDX.forEach((pi,k)=>{const p=pose[pi]; f[k*3]=(X(p)-cx)/s; f[k*3+1]=(Y(p)-cy)/s; f[k*3+2]=(Z(p)-cz)/s;});
   const L=res.leftHandLandmarks&&res.leftHandLandmarks[0], R=res.rightHandLandmarks&&res.rightHandLandmarks[0];
-  if(L&&L.length>=21){L.forEach((p,k)=>{f[27+k*3]=(p.x-cx)/s;f[28+k*3]=(p.y-cy)/s;f[29+k*3]=(p.z-cz)/s;}); f[153]=1;}
-  if(R&&R.length>=21){R.forEach((p,k)=>{f[90+k*3]=(p.x-cx)/s;f[91+k*3]=(p.y-cy)/s;f[92+k*3]=(p.z-cz)/s;}); f[154]=1;}
+  if(L&&L.length>=21){L.forEach((p,k)=>{f[27+k*3]=(X(p)-cx)/s;f[28+k*3]=(Y(p)-cy)/s;f[29+k*3]=(Z(p)-cz)/s;}); f[153]=1;}
+  if(R&&R.length>=21){R.forEach((p,k)=>{f[90+k*3]=(X(p)-cx)/s;f[91+k*3]=(Y(p)-cy)/s;f[92+k*3]=(Z(p)-cz)/s;}); f[154]=1;}
   const pts=a=>a?a.map(p=>[+p.x.toFixed(4),+p.y.toFixed(4)]):[];
   return {f,lm:{pose:pts(pose).slice(0,25),left:pts(L),right:pts(R)}};
 }
@@ -82,7 +84,7 @@ function step(){
   requestAnimationFrame(step);
   if(!ws||ws.readyState!==1||inflight||!video.videoWidth||video.readyState<2) return;
   if(fast){
-    let ts=performance.now(); if(ts<=lastTs) ts=lastTs+1; lastTs=ts;
+    let ts=performance.now(); if(ts-lastTs<30) return; lastTs=ts;  // ~30 fps, like the training videos
     const {f,lm}=feats(landmarker.detectForVideo(video,ts)); draw(lm);
     const msg={f:Array.from(f,v=>Math.round(v*10000)/10000),t:ts,lm}; if(forceEnd){msg.end=true; forceEnd=false;}
     inflight=true; ws.send(JSON.stringify(msg)); sendPreview();

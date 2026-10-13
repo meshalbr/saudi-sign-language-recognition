@@ -99,3 +99,26 @@ def test_segmenter_ignores_the_raise_from_rest():
     finals = [o for o in (seg.push(f, k * 33.3) for k, f in enumerate(stream)) if o is not None]
     assert len(finals) == 1
     assert len(finals[0]) == 30  # only the frames above the rest line
+
+
+@pytest.mark.skipif(not (RUN / "model.onnx").exists(), reason="needs a trained run")
+def test_reference_endpoints_reject_paths_outside_the_dataset():
+    from fastapi.testclient import TestClient
+
+    from app import server
+
+    server.STATE.update(run=str(RUN), names="data/karsl_labels.json", window=8, stride=1)
+    client = TestClient(server.app)
+    for bad in ("..%5C..%5Capp", "C:%5CWindows", "..", "0071%5C..%5C0072"):
+        for ep in ("ref", "clip", "sprite"):
+            assert client.get(f"/api/{ep}/{bad}").status_code == 404, (ep, bad)
+
+
+def test_segmenter_caps_a_sign_at_six_seconds():
+    from app.server import Segmenter
+
+    seg = Segmenter(max_ms=6000)
+    up = _frame(0.5)
+    outs = [seg.push(up, k * 33.3) for k in range(400)]  # 13 s of continuous signing
+    lengths = [len(o) for o in outs if o is not None]
+    assert len(lengths) == 2 and all(170 <= n <= 182 for n in lengths)

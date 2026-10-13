@@ -188,7 +188,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   const sendCanvas=document.createElement('canvas'); const sctx=sendCanvas.getContext('2d');
   let ws=null, stream=null, facing='user', inflight=false, labels=[], fpsN=0, fpsT=performance.now();
   let stable={id:null,count:0,fired:false}; const STABLE_N=3, THRESH=0.6;
-  let mode='live', target=null, done=new Set(), order=[], ptr=0;
+  let mode='live', target=null, done=new Set(), order=[], ptr=-1;  // -1 so the first word is practised first
   const HAND_EDGES=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 
   // Tabs
@@ -275,18 +275,20 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   function featuresFromResult(res){
     const f=new Float32Array(155);
     const pose=(res.poseLandmarks&&res.poseLandmarks[0])||null; if(!pose||pose.length<33) return {f,lm:{pose:[],left:[],right:[]}};
-    const l=pose[11], r=pose[12]; const cx=(l.x+r.x)/2, cy=(l.y+r.y)/2, cz=(l.z+r.z)/2; let s=Math.hypot(l.x-r.x,l.y-r.y); if(!(s>1e-3)) s=1;
-    POSE_IDX.forEach((pi,k)=>{ const p=pose[pi]; f[k*3]=(p.x-cx)/s; f[k*3+1]=(p.y-cy)/s; f[k*3+2]=(p.z-cz)/s; });
+    // Convert to the 16:9 training aspect (KArSL is 1920x1080): x and z scale by aspect/(16/9).
+    const ka=((video.videoWidth||16)/(video.videoHeight||9))/(16/9); const X=p=>p.x*ka, Y=p=>p.y, Z=p=>p.z*ka;
+    const l=pose[11], r=pose[12]; const cx=(X(l)+X(r))/2, cy=(Y(l)+Y(r))/2, cz=(Z(l)+Z(r))/2; let s=Math.hypot(X(l)-X(r),Y(l)-Y(r)); if(!(s>1e-3)) s=1;
+    POSE_IDX.forEach((pi,k)=>{ const p=pose[pi]; f[k*3]=(X(p)-cx)/s; f[k*3+1]=(Y(p)-cy)/s; f[k*3+2]=(Z(p)-cz)/s; });
     const left=(res.leftHandLandmarks&&res.leftHandLandmarks[0])||null, right=(res.rightHandLandmarks&&res.rightHandLandmarks[0])||null;
-    if(left&&left.length>=21){ left.forEach((p,k)=>{ f[27+k*3]=(p.x-cx)/s; f[27+k*3+1]=(p.y-cy)/s; f[27+k*3+2]=(p.z-cz)/s; }); f[153]=1; }
-    if(right&&right.length>=21){ right.forEach((p,k)=>{ f[90+k*3]=(p.x-cx)/s; f[90+k*3+1]=(p.y-cy)/s; f[90+k*3+2]=(p.z-cz)/s; }); f[154]=1; }
+    if(left&&left.length>=21){ left.forEach((p,k)=>{ f[27+k*3]=(X(p)-cx)/s; f[27+k*3+1]=(Y(p)-cy)/s; f[27+k*3+2]=(Z(p)-cz)/s; }); f[153]=1; }
+    if(right&&right.length>=21){ right.forEach((p,k)=>{ f[90+k*3]=(X(p)-cx)/s; f[90+k*3+1]=(Y(p)-cy)/s; f[90+k*3+2]=(Z(p)-cz)/s; }); f[154]=1; }
     const pts=a=>a?a.map(p=>[p.x,p.y]):[];
     return {f,lm:{pose:pts(pose),left:pts(left),right:pts(right)}};
   }
   let lastTs=-1;
   function fastStep(){
     if(!fastMode||!landmarker||!ws||ws.readyState!==1||inflight||!video.videoWidth||video.readyState<2) return;
-    let ts=performance.now(); if(ts<=lastTs) ts=lastTs+1; lastTs=ts;
+    let ts=performance.now(); if(ts-lastTs<30) return; lastTs=ts;  // ~30 fps, like the training videos
     const res=landmarker.detectForVideo(video,ts);
     const {f,lm}=featuresFromResult(res);
     drawLandmarks(lm); lastLm=lm;
@@ -369,7 +371,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
       $('teachCount').textContent=`Taught: ${target?(userCounts[target.id]||0):0} examples of this word, ${tot} in total`;
       $('mBase').setAttribute('aria-pressed',u.model==='base'); $('mPersonal').setAttribute('aria-pressed',u.model==='personal');
       const st=u.status||{}; if(st.state==='training') $('trainStatus').textContent=`Training… epoch ${st.epoch} of ${st.epochs}. Keep this page open.`;
-      else if(st.state==='done') $('trainStatus').textContent='Done: '+st.message+'. Now using your model.';
+      else if(st.state==='done') $('trainStatus').textContent='Done: '+st.message+(u.model==='personal'?'. Now using your model.':'. Press My model to use it.');
       else if(st.state==='error') $('trainStatus').textContent='Training failed: '+st.message;
       return st.state; }catch(e){ return 'error'; } }
   async function teachSave(){ if(!$('teachOn').checked||!target) return; try{ const r=await fetch('/api/save/'+target.id,{method:'POST'}).then(r=>r.json()); if(r.count){ $('pStatus').textContent+=` · saved as example ${r.count}`; } }catch(e){} refreshUser(); }

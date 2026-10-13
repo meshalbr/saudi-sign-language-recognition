@@ -48,7 +48,8 @@ def train(cfg: dict, test_signer: str | None = None) -> dict:
     )
     save_labels(out_dir / "labels.json", label_map)
 
-    (out_dir / "config.json").write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    saved = {**cfg, "test_signer": test_signer}
+    (out_dir / "config.json").write_text(json.dumps(saved, indent=2), encoding="utf-8")
     train_ds = ClipDataset(
         train_clips, label_map, seq_len, train=bool(cfg.get("augment", True)), cfg=cfg
     )

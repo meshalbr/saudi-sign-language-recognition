@@ -32,6 +32,11 @@ RIGHT_SLICE = slice(POSE_DIM + HAND_DIM, POSE_DIM + 2 * HAND_DIM)
 LEFT_FLAG = FEATURE_DIM - 2
 RIGHT_FLAG = FEATURE_DIM - 1
 
+# All KArSL videos are 1920x1080. MediaPipe returns x as a fraction of image width and y as a
+# fraction of height, so features depend on the frame's aspect ratio. Live frames are converted
+# to this aspect (x and z scaled by aspect / TRAIN_ASPECT) so they match training exactly.
+TRAIN_ASPECT = 1920 / 1080
+
 DEFAULT_MODEL = Path(__file__).resolve().parents[2] / "models" / "holistic_landmarker.task"
 MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/holistic_landmarker/"
@@ -58,14 +63,22 @@ def features_from_arrays(
     pose: np.ndarray | None,
     left: np.ndarray | None,
     right: np.ndarray | None,
+    aspect: float = TRAIN_ASPECT,
 ) -> np.ndarray:
     """Build the 155-d feature vector from raw (33,3) pose and (21,3) hand arrays.
 
-    Any of the inputs may be None. With no pose, the frame is all zeros.
+    ``aspect`` is the source frame's width / height. Any of the inputs may be None. With no
+    pose, the frame is all zeros.
     """
     feat = np.zeros(FEATURE_DIM, dtype=np.float32)
     if pose is None:
         return feat
+    k = float(aspect) / TRAIN_ASPECT
+    if abs(k - 1.0) > 1e-6:
+        fix = np.array([k, 1.0, k], dtype=np.float32)
+        pose = pose * fix
+        left = None if left is None else left * fix
+        right = None if right is None else right * fix
     sel = pose[POSE_IDX]
     l_sh, r_sh = pose[11], pose[12]
     center = (l_sh + r_sh) / 2.0
@@ -82,12 +95,12 @@ def features_from_arrays(
     return feat
 
 
-def features_from_result(result) -> np.ndarray:
-    """Build the feature vector from a HolisticLandmarkerResult."""
+def features_from_result(result, aspect: float = TRAIN_ASPECT) -> np.ndarray:
+    """Build the feature vector from a HolisticLandmarkerResult (``aspect`` = frame W / H)."""
     pose = _to_array(result.pose_landmarks, 33)
     left = _to_array(result.left_hand_landmarks, N_HAND)
     right = _to_array(result.right_hand_landmarks, N_HAND)
-    return features_from_arrays(pose, left, right)
+    return features_from_arrays(pose, left, right, aspect)
 
 
 def mirror_features(x: np.ndarray) -> np.ndarray:
@@ -154,7 +167,8 @@ class HolisticExtractor:
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
         self.last_result = self._landmarker.detect_for_video(image, timestamp_ms)
-        return features_from_result(self.last_result)
+        h, w = bgr.shape[:2]
+        return features_from_result(self.last_result, aspect=w / h)
 
     def close(self) -> None:
         self._landmarker.close()

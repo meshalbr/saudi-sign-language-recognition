@@ -79,25 +79,35 @@ def _train(base_run: Path, out_run: Path, epochs: int, on_done) -> None:
         with torch.no_grad():
             ud = DataLoader(ClipDataset(user, label_map, seq, cfg=cfg), batch_size=64)
             hit = sum(int((model(x).argmax(1) == y).sum()) for x, y in ud)
-        out_run.mkdir(parents=True, exist_ok=True)
+        # Build the new run in a staging folder so a failed export never leaves a mixed run.
+        stage = out_run.with_name(out_run.name + "_staging")
+        shutil.rmtree(stage, ignore_errors=True)
+        stage.mkdir(parents=True)
         torch.save(
             {"state_dict": model.state_dict(), "cfg": cfg, "num_classes": ckpt["num_classes"]},
-            out_run / "best.pt",
+            stage / "best.pt",
         )
         for name in ("labels.json", "config.json"):
             if (base_run / name).exists():
-                shutil.copy(base_run / name, out_run / name)
-        _export(out_run)
+                shutil.copy(base_run / name, stage / name)
+        _export(stage)
+        shutil.rmtree(out_run, ignore_errors=True)
+        stage.rename(out_run)
+        on_done(out_run)
         STATUS.update(
             state="done",
             message=f"trained on {len(user)} of your examples; fits {hit}/{len(user)} of them",
         )
-        on_done(out_run)
     except Exception as e:  # noqa: BLE001 - report any failure to the page
         STATUS.update(state="error", message=str(e))
 
 
 def _export(run: Path) -> None:
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:  # works however the server was started
+        sys.path.insert(0, str(root))
     from scripts.export_onnx import export
 
     export(run)
