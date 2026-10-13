@@ -57,11 +57,11 @@ def _signer_of(v: Path, fixed: str | None, from_name: bool) -> str:
 
 def _worker(job: tuple) -> tuple[int, int, int, list[str]]:
     """Process one chunk of videos with its own extractor. Returns (done, skipped, failed, errs)."""
-    videos, out, signer, from_name, max_frames, width, overwrite, wid = job
+    videos, out, signer, from_name, max_frames, width, overwrite, wid, min_conf = job
     done = skipped = failed = 0
     errs: list[str] = []
     t0 = time.time()
-    with HolisticExtractor() as ex:
+    with HolisticExtractor(min_conf=min_conf) as ex:
         for k, v in enumerate(videos, 1):
             dest = out / v.parent.name / f"{v.stem}.npz"
             if dest.exists() and not overwrite:
@@ -93,9 +93,14 @@ def main() -> None:
     ap.add_argument("--width", type=int, default=640, help="downscale frames to this width")
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--overwrite", action="store_true")
+    ap.add_argument("--min-conf", type=float, default=0.5, help="MediaPipe detection confidence")
+    ap.add_argument("--signs", nargs="*", default=None, help="only these sign folders")
     args = ap.parse_args()
 
     videos = sorted(p for p in Path(args.videos).glob("*/*") if p.suffix.lower() in VIDEO_EXT)
+    if args.signs:
+        keep = set(args.signs)
+        videos = [v for v in videos if v.parent.name in keep]
     if not videos:
         raise SystemExit(f"no videos under {args.videos}")
     out = Path(args.out)
@@ -103,7 +108,17 @@ def main() -> None:
     t0 = time.time()
     chunks = [videos[i :: args.workers] for i in range(args.workers)]
     jobs = [
-        (c, out, args.signer, args.signer_from_name, args.max_frames, args.width, args.overwrite, i)
+        (
+            c,
+            out,
+            args.signer,
+            args.signer_from_name,
+            args.max_frames,
+            args.width,
+            args.overwrite,
+            i,
+            args.min_conf,
+        )
         for i, c in enumerate(chunks)
     ]
     if args.workers == 1:

@@ -49,8 +49,10 @@ def run(n: int = 200, seed: int = 1, run_dir: str = "runs/final_tf_all_official"
     for f in files:
         x = np.load(f)["x"]
         y = f.replace("\\", "/").split("/")[-2]
-        for name, seq in (("clean", np.concatenate([x, [shifted(x[-1], 3)] * 25])),
-                          ("raised", with_raise(x))):
+        for name, seq in (
+            ("clean", np.concatenate([x, [shifted(x[-1], 3)] * 25])),
+            ("raised", with_raise(x)),
+        ):
             s = server.Session()
             fin = []
             for k, row in enumerate(seq):

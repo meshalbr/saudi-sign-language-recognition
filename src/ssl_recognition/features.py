@@ -55,3 +55,22 @@ def transform(x: np.ndarray, cfg: dict) -> np.ndarray:
         vel[1:] = coords[1:] - coords[:-1]
         y = np.concatenate([y, vel], axis=1)
     return y
+
+
+def fill_gaps(x: np.ndarray, max_gap: int = 8) -> np.ndarray:
+    """Linearly interpolate a hand that MediaPipe lost for at most ``max_gap`` frames.
+
+    Only gaps with the same hand detected on both sides are filled; longer gaps and missing hands
+    at the start or end stay missing. The pose block is untouched.
+    """
+    y = x.astype(np.float32, copy=True)
+    for blk, flag in ((LEFT_SLICE, LEFT_FLAG), (RIGHT_SLICE, RIGHT_FLAG)):
+        present = y[:, flag] > 0
+        idx = np.where(present)[0]
+        for a, b in zip(idx[:-1], idx[1:], strict=False):
+            gap = b - a - 1
+            if 0 < gap <= max_gap:
+                w = (np.arange(1, gap + 1) / (gap + 1))[:, None].astype(np.float32)
+                y[a + 1 : b, blk] = y[a, blk] * (1 - w) + y[b, blk] * w
+                y[a + 1 : b, flag] = 1.0
+    return y

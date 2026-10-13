@@ -19,7 +19,7 @@ import cv2
 import numpy as np
 
 from .data import load_labels, resample
-from .features import transform
+from .features import fill_gaps, transform
 from .landmarks import HolisticExtractor, draw_result
 
 
@@ -58,6 +58,8 @@ class Predictor:
 
     def predict(self, x: np.ndarray) -> np.ndarray:
         """x: (T, D) -> softmax probabilities over labels."""
+        if self.cfg.get("fill_gaps"):
+            x = fill_gaps(x, int(self.cfg["fill_gaps"]))
         x = transform(resample(x, self.seq_len), self.cfg)[None]
         if self.use_onnx:
             logits = self.sess.run(None, {self.input_name: x})[0][0]

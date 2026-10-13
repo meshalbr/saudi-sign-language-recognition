@@ -51,3 +51,20 @@ def test_hand_drop_zeroes_one_hand():
     flags = y[:, [LEFT_FLAG, RIGHT_FLAG]]
     assert set(np.unique(flags)) <= {0.0, 1.0}
     assert (flags.sum(axis=1) == 1).all()  # exactly one hand left per frame
+
+
+def test_fill_gaps_interpolates_short_gaps_only():
+    from ssl_recognition.features import fill_gaps
+
+    x = np.zeros((20, FEATURE_DIM), np.float32)
+    x[:, RIGHT_FLAG] = 1.0
+    x[:, RIGHT_SLICE] = np.arange(20, dtype=np.float32)[:, None]
+    x[5:8, RIGHT_FLAG] = 0.0  # 3-frame gap: filled
+    x[5:8, RIGHT_SLICE] = 0.0
+    x[10:20, RIGHT_FLAG] = 0.0  # gap to the end: not filled
+    x[10:20, RIGHT_SLICE] = 0.0
+    y = fill_gaps(x, max_gap=8)
+    assert (y[5:8, RIGHT_FLAG] == 1).all()
+    assert np.allclose(y[5:8, RIGHT_SLICE.start], [5, 6, 7])
+    assert (y[10:, RIGHT_FLAG] == 0).all()
+    assert not y[:, LEFT_FLAG].any()

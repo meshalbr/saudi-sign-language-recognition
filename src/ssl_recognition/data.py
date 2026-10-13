@@ -180,9 +180,10 @@ class ClipDataset:
     def __getitem__(self, i: int):
         import torch
 
-        from .features import transform
+        from .features import fill_gaps, transform
 
         c = self.clips[i]
-        x = augment(c.x, self.rng, self.hand_drop) if self.train else c.x
+        x = fill_gaps(c.x, int(self.cfg.get("fill_gaps", 0))) if self.cfg.get("fill_gaps") else c.x
+        x = augment(x, self.rng, self.hand_drop) if self.train else x
         x = transform(resample(x, self.seq_len), self.cfg)
         return torch.from_numpy(x), self.label_map[c.label]

@@ -67,12 +67,36 @@ def labels():
     return JSONResponse(STATE["labels"])
 
 
+def _coverage(npz: Path) -> float:
+    with np.load(npz) as z:
+        x = z["x"]
+    present = (x[:, -2] + x[:, -1]) > 0
+    return float(present.mean())
+
+
+_BEST_REF: dict[str, str] = {}
+
+
+def _best_reference_stem(sid: str) -> str | None:
+    """The reference recording with the best hand tracking among signer 01 test clips."""
+    if sid not in _BEST_REF:
+        cands = sorted(Path("data/landmarks", sid).glob("s01_test_*.npz")) or sorted(
+            Path("data/landmarks", sid).glob("*.npz")
+        )
+        if not cands:
+            return None
+        _BEST_REF[sid] = max(cands[:20], key=_coverage).stem
+    return _BEST_REF[sid]
+
+
 def _reference_file(sid: str, suffix: str, folder: str) -> Path | None:
-    """First reference clip for a sign: prefer signer 01 test clips, then anything."""
+    stem = _best_reference_stem(sid)
+    if stem is not None:
+        f = Path(folder) / sid / f"{stem}{suffix}"
+        if f.exists():
+            return f
     d = Path(folder) / sid
-    if not d.is_dir():
-        return None
-    files = sorted(d.glob(f"s01_test_*{suffix}")) or sorted(d.glob(f"*{suffix}"))
+    files = sorted(d.glob(f"*{suffix}")) if d.is_dir() else []
     return files[0] if files else None
 
 
@@ -82,8 +106,10 @@ def reference(sid: str):
     f = _reference_file(sid, ".npz", "data/landmarks")
     if f is None:
         return JSONResponse({"error": "no reference clip"}, status_code=404)
+    from ssl_recognition.features import fill_gaps
+
     with np.load(f) as z:
-        x = z["x"]
+        x = fill_gaps(z["x"], 8)
     frames = []
     for row in x:
         pose = row[:27].reshape(9, 3)[:, :2]
@@ -105,7 +131,7 @@ SPRITE_FRAMES, SPRITE_H = 24, 180
 @app.get("/api/sprite/{sid}")
 def sprite(sid: str):
     """Reference clip rendered once into a horizontal strip of JPEG frames (codec-free playback)."""
-    dest = Path("data/sprites") / f"{sid}.jpg"
+    dest = Path("data/sprites") / f"{sid}_{_best_reference_stem(sid)}.jpg"
     if not dest.exists():
         f = _reference_file(sid, ".mp4", "data/videos")
         if f is None:
