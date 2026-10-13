@@ -69,6 +69,67 @@ class Predictor:
         return p / p.sum()
 
 
+WIN = "Saudi Sign Language"
+PANEL_W = 460
+INK, PANEL_BG, MUTED, GREEN, AMBER, WHITE = (
+    (30, 24, 20),
+    (36, 30, 26),
+    (170, 170, 170),
+    (90, 200, 110),
+    (60, 160, 230),
+    (240, 240, 240),
+)
+
+
+def open_camera(source: str) -> cv2.VideoCapture:
+    """Open a local camera index or a network stream (phone camera apps give an http/rtsp URL)."""
+    if source.isdigit():
+        return cv2.VideoCapture(int(source), cv2.CAP_DSHOW)
+    return cv2.VideoCapture(source)
+
+
+def _text(img, s, xy, scale, colour, thick=2):
+    cv2.putText(img, s, xy, cv2.FONT_HERSHEY_SIMPLEX, scale, colour, thick, cv2.LINE_AA)
+
+
+def compose(frame, top, threshold, hands_now, fps, use_onnx) -> np.ndarray:
+    """Video on the left at 720p height, dark results panel on the right; scales with the window."""
+    h = 720
+    w = int(frame.shape[1] * h / frame.shape[0])
+    video = cv2.resize(frame, (w, h), interpolation=cv2.INTER_LINEAR)
+    panel = np.full((h, PANEL_W, 3), PANEL_BG, dtype=np.uint8)
+    _text(panel, "SAUDI SIGN LANGUAGE", (24, 48), 0.8, MUTED, 2)
+    _text(panel, "Top prediction", (24, 110), 0.6, MUTED, 1)
+    if top:
+        lab, prob = top[0]
+        sid, _, name = lab.partition(" ")
+        colour = GREEN if prob >= threshold else AMBER
+        _text(panel, name[:22] or sid, (24, 165), 1.3, WHITE, 3)
+        _text(panel, f"sign {sid}", (24, 200), 0.7, MUTED, 1)
+        cv2.rectangle(panel, (24, 220), (PANEL_W - 24, 244), (60, 54, 50), -1)
+        cv2.rectangle(panel, (24, 220), (24 + int((PANEL_W - 48) * prob), 244), colour, -1)
+        _text(panel, f"{prob * 100:.0f}% confidence", (24, 275), 0.7, colour, 2)
+        _text(panel, "Also likely", (24, 340), 0.6, MUTED, 1)
+        for k, (lab2, p2) in enumerate(top[1:3]):
+            sid2, _, name2 = lab2.partition(" ")
+            _text(panel, f"{name2[:20] or sid2}", (24, 380 + 44 * k), 0.8, WHITE, 2)
+            _text(panel, f"{p2 * 100:.0f}%", (PANEL_W - 90, 380 + 44 * k), 0.8, MUTED, 2)
+    else:
+        _text(panel, "Show your hands", (24, 165), 1.1, AMBER, 2)
+        _text(panel, "to the camera", (24, 210), 1.1, AMBER, 2)
+    _text(panel, f"hands detected: {hands_now}", (24, h - 110), 0.6, MUTED, 1)
+    _text(
+        panel,
+        f"{fps:.1f} FPS  {'ONNX Runtime' if use_onnx else 'PyTorch'}",
+        (24, h - 80),
+        0.6,
+        MUTED,
+        1,
+    )
+    _text(panel, "Q / Esc / close window to quit", (24, h - 40), 0.55, MUTED, 1)
+    return np.concatenate([video, panel], axis=1)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--run", default="runs/baseline")
@@ -76,20 +137,28 @@ def main() -> None:
     ap.add_argument("--window", type=int, default=40)
     ap.add_argument("--stride", type=int, default=5)
     ap.add_argument("--threshold", type=float, default=0.6)
-    ap.add_argument("--camera", type=int, default=0)
+    ap.add_argument(
+        "--camera",
+        default="0",
+        help="camera index (0, 1, ...) or a stream URL from a phone camera app",
+    )
     ap.add_argument("--names", default="data/karsl_labels.json", help="label display names")
     args = ap.parse_args()
 
     pred = Predictor(Path(args.run), use_onnx=args.onnx, names=Path(args.names))
-    cap = cv2.VideoCapture(args.camera, cv2.CAP_DSHOW)
+    cap = open_camera(args.camera)
     if not cap.isOpened():
-        raise SystemExit("Could not open the webcam")
+        raise SystemExit(f"Could not open camera {args.camera!r}")
+
+    cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)  # resizable; drag the corner or maximise
+    cv2.resizeWindow(WIN, 1280, 720)
 
     buf: collections.deque = collections.deque(maxlen=args.window)
-    top = []
+    top: list[tuple[str, float]] = []
     frame_i = 0
     fps_t, fps_n, fps = time.time(), 0, 0.0
     t_start = time.time()
+    hands_now = 0
     with HolisticExtractor() as ex:
         while True:
             ok, frame = cap.read()
@@ -97,6 +166,7 @@ def main() -> None:
                 break
             frame = cv2.flip(frame, 1)
             feat = ex.process(frame, int((time.time() - t_start) * 1000))
+            hands_now = int(feat[-2] + feat[-1])
             buf.append(feat)
             frame_i += 1
             if frame_i % args.stride == 0 and len(buf) >= args.window // 2:
@@ -108,31 +178,15 @@ def main() -> None:
                 else:
                     top = []
             draw_result(frame, ex.last_result)
-            for k, (lab, prob) in enumerate(top):
-                colour = (0, 255, 0) if (k == 0 and prob >= args.threshold) else (200, 200, 200)
-                cv2.putText(
-                    frame,
-                    f"{lab}: {prob:.2f}",
-                    (10, 40 + 30 * k),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.9,
-                    colour,
-                    2,
-                )
             fps_n += 1
             if time.time() - fps_t >= 1.0:
                 fps, fps_n, fps_t = fps_n / (time.time() - fps_t), 0, time.time()
-            cv2.putText(
-                frame,
-                f"{fps:.1f} FPS  {'onnx' if args.onnx else 'torch'}",
-                (10, frame.shape[0] - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 255, 255),
-                2,
-            )
-            cv2.imshow("Saudi Sign Language", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+            canvas = compose(frame, top, args.threshold, hands_now, fps, args.onnx)
+            cv2.imshow(WIN, canvas)
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord("q"), 27):  # q or Esc
+                break
+            if cv2.getWindowProperty(WIN, cv2.WND_PROP_VISIBLE) < 1:  # window closed with X
                 break
     cap.release()
     cv2.destroyAllWindows()
