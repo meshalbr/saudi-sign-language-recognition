@@ -48,7 +48,7 @@ def test_labels_and_one_frame():
         finals, shown = [], []
         rows = list(x) + [np.zeros(155, np.float32)] * 30
         with client.websocket_connect("/ws_display") as disp:
-            with client.websocket_connect("/ws_feat") as ws:
+            with client.websocket_connect("/ws_feat?role=camera") as ws:
                 for k, row in enumerate(rows):
                     ws.send_text(json.dumps({"f": [float(v) for v in row], "t": k * 33.3}))
                     m = json.loads(ws.receive_text())

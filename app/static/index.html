@@ -115,6 +115,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
       <button class="btn ghost" id="btnFlip" title="switch front/back camera">Switch camera</button>
       <button class="btn ghost" id="btnMirror">Mirror</button>
       <button class="btn ghost" id="btnMode" title="where MediaPipe runs">Mode: auto</button>
+      <button class="btn ghost" id="btnShowQR" hidden>Show QR</button>
     </div>
   </section>
 
@@ -331,7 +332,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
       if(typeof e.data!=='string'){ // preview JPEG from the phone
         const u=URL.createObjectURL(new Blob([e.data],{type:'image/jpeg'})); $('phoneView').src=u; if(lastBlobUrl) URL.revokeObjectURL(lastBlobUrl); lastBlobUrl=u;
         if(!$('pair').hidden){ $('pair').hidden=true; } $('phoneView').hidden=false; $('cCam').textContent='phone camera'; $('cCam').classList.add('on'); return; }
-      const r=JSON.parse(e.data); if(!$('pair').hidden) $('pair').hidden=true; $('cSrv').textContent='phone connected';
+      const r=JSON.parse(e.data); $('cSrv').textContent='phone connected';
       if(r.lm){ drawPhoneLm(r.lm); r.lm=null; } onResult(r);
     };
     phoneWs.onclose=()=>{ $('cSrv').textContent='display disconnected'; $('cSrv').classList.remove('on'); setTimeout(()=>{ if(phoneWs) connectDisplay(); },1500); };
@@ -343,11 +344,12 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
     for(const [pts,col] of [[lm.left||[],'rgba(61,214,140,.95)'],[lm.right||[],'rgba(242,184,59,.95)']]){ if(!pts.length) continue; ctx.strokeStyle=col; ctx.lineWidth=3; HAND_EDGES.forEach(([a,b])=>{ if(!pts[a]||!pts[b])return; const A=P(pts[a]),B=P(pts[b]); ctx.beginPath(); ctx.moveTo(A[0],A[1]); ctx.lineTo(B[0],B[1]); ctx.stroke(); }); }
   }
   $('btnPhone').addEventListener('click',async()=>{
-    $('gate').hidden=true; $('pair').hidden=false;
+    $('gate').hidden=true; $('pair').hidden=false; $('btnShowQR').hidden=false;
     try{ const info=await fetch('/api/info').then(r=>r.json()); showQR(info.camera_url); }catch(e){ $('pairUrl').textContent='Could not read the laptop address.'; }
     if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } if(ws){ ws.onclose=null; ws.close(); ws=null; }
     connectDisplay();
   });
+  $('btnShowQR').addEventListener('click',()=>{ $('pair').hidden=!$('pair').hidden; });
   $('btnPairCancel').addEventListener('click',()=>{ $('pair').hidden=true; $('gate').hidden=false; if(phoneWs){ const w=phoneWs; phoneWs=null; w.onclose=null; w.close(); } });
   setShow(showMode);
   function setState(cls,text){ $('rState').className='state '+cls; $('rStateText').textContent=text; }

@@ -264,13 +264,15 @@ async def ws_feat(websocket: WebSocket):
     JPEG preview frames (binary), which are relayed to laptop displays."""
     await websocket.accept()
     sess = Session()
+    relay = websocket.query_params.get("role") == "camera"
     try:
         while True:
             m = await websocket.receive()
             if m.get("type") == "websocket.disconnect":
                 break
             if m.get("bytes") is not None:
-                await broadcast_bytes(m["bytes"])
+                if relay:
+                    await broadcast_bytes(m["bytes"])
                 continue
             msg = json.loads(m.get("text") or "{}")
             if "gap_ms" in msg:
@@ -283,7 +285,7 @@ async def ws_feat(websocket: WebSocket):
             out = sess.step(feat, t_ms, end=bool(msg.get("end")))
             out["ms"] = round((time.perf_counter() - t) * 1000, 1)
             await websocket.send_text(json.dumps(out))
-            if DISPLAYS:
+            if relay and DISPLAYS:
                 await broadcast_text({**out, "lm": msg.get("lm"), "src": "phone"})
     except WebSocketDisconnect:
         pass
@@ -294,6 +296,7 @@ async def ws(websocket: WebSocket):
     """Server path: the browser sends JPEG frames; MediaPipe runs here."""
     await websocket.accept()
     sess = Session()
+    relay = websocket.query_params.get("role") == "camera"
     t0 = time.time()
     with HolisticExtractor() as ex:
         try:
@@ -319,10 +322,10 @@ async def ws(websocket: WebSocket):
                     out = sess.step(feat, time.time() * 1000)
                     out["lm"] = landmarks_payload(ex.last_result)
                     out["ms"] = round((time.perf_counter() - t) * 1000, 1)
-                    if DISPLAYS:
+                    if relay and DISPLAYS:
                         await broadcast_bytes(data)
                 await websocket.send_text(json.dumps(out))
-                if DISPLAYS:
+                if relay and DISPLAYS:
                     await broadcast_text({**out, "src": "phone"})
         except WebSocketDisconnect:
             pass

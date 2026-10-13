@@ -93,7 +93,7 @@ function step(){
   }
 }
 function connect(){
-  ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/${fast?'ws_feat':'ws'}`); ws.binaryType='arraybuffer';
+  ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/${fast?'ws_feat':'ws'}?role=camera`); ws.binaryType='arraybuffer';
   ws.onopen=()=>{inflight=false; $('cConn').textContent='connected to laptop'; $('cConn').classList.add('on');};
   ws.onmessage=e=>{ inflight=false; const r=JSON.parse(e.data);
     fpsN++; const now=performance.now(); if(now-fpsT>1000){$('cFps').textContent=Math.round(fpsN*1000/(now-fpsT))+' fps'; fpsN=0; fpsT=now;}
