@@ -8,10 +8,11 @@ body-normalised landmark numbers, and a small bidirectional GRU classifies the s
 frames into a sign. That keeps the training data tiny, inference fast on a CPU, and the
 signer's face out of the pipeline.
 
-> Status: day 1. Pipeline, recorder, trainer, ONNX export and live demo are in place and
-> tested (11 tests, CI green). First baseline: **99.0% top-1 on KArSL-100 (100 signs, official
-> split, signer 01)** with a 566k-parameter BiGRU trained on the laptop CPU. Signers 02 and 03
-> are being extracted for the signer-independent evaluation, which is the number that matters.
+> Status: day 2. Pipeline, recorder, trainer, ONNX export and live demo are in place and
+> tested (11 tests, CI green). On KArSL-100 (100 signs, 3 signers, 15,117 clips) the
+> 566k-parameter BiGRU reaches **99.6% top-1** on the official split and **67.0% top-1 /
+> 88.4% top-5 leave-one-signer-out**, all trained on the laptop CPU. The signer gap is the
+> next target.
 
 ## Why this matters
 
@@ -104,7 +105,14 @@ here as they land.
 | Date | Data | Split | Top-1 | Top-5 | Notes |
 |---|---|---|---|---|---|
 | 2026-10-12 | 6 signs, signer 01 | official | 0.88 | 1.00 | smoke run on partial data, validates the loop only |
-| 2026-10-12 | KArSL-100, signer 01, 100 classes | official (800 test clips) | **0.990** | 0.998 | BiGRU, 566k params, trained on the laptop CPU in 37 min. Signer-dependent. |
+| 2026-10-12 | KArSL-100, signer 01, 100 classes | official (800 test clips) | 0.990 | 0.998 | BiGRU, 566k params, trained on the laptop CPU in 37 min. Signer-dependent. |
+| 2026-10-13 | KArSL-100, all 3 signers | official (2,400 test clips) | **0.996** | 1.000 | signer-dependent |
+| 2026-10-13 | KArSL-100, leave-one-signer-out | mean of 3 folds (15,117 test clips) | **0.670** | 0.884 | signer-independent: s03 0.683, s02 0.641, s01 0.687 |
+
+The gap between the two bottom rows is the project's central finding so far: the same model is
+near perfect on signers it has seen and reaches two thirds top-1 on a new signer, while top-5
+stays near 0.9. Validation accuracy hits 1.000 in every fold, so the model memorises signer
+style. Closing that gap is the next phase of work.
 
 ## Edge benchmark
 
@@ -120,12 +128,14 @@ Planned: lower capture resolution, INT8 quantisation, DirectML on the integrated
 
 ## Roadmap
 
-1. Baseline GRU on KArSL-100, signer 01, official split
-2. Signer-independent evaluation across all three signers
-3. All 502 KArSL signs
-4. ONNX INT8 and DirectML benchmark chapter
-5. Live demo with sign-boundary detection
-6. Continuous Saudi Sign Language on Isharah pose data (CTC over landmark sequences)
+1. ~~Baseline GRU on KArSL-100, signer 01, official split~~ done, 0.990
+2. ~~Signer-independent evaluation across all three signers~~ done, 0.670 mean top-1
+3. Close the signer gap: hand-scale normalisation, velocity features, hand-block dropout,
+   stronger augmentation, Transformer comparison
+4. All 502 KArSL signs
+5. ONNX INT8 and DirectML benchmark chapter
+6. Live demo with sign-boundary detection
+7. Continuous Saudi Sign Language on Isharah pose data (CTC over landmark sequences)
 
 ## Data
 
