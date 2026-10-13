@@ -92,7 +92,8 @@ python scripts/download_models.py             # MediaPipe holistic model, 14 MB,
 | Train the deployment model (all signers, official split) | `python -m ssl_recognition.train --config configs/final_tf_all_official.yaml` |
 | Train a held-out-signer fold | `python -m ssl_recognition.train --config configs/p2_s03_tf_strong.yaml --test-signer s03` |
 | Export to ONNX (with parity check) | `python scripts/export_onnx.py --run runs/final_tf_all_official` |
-| Live webcam demo | `python -m ssl_recognition.infer --run runs/final_tf_all_official --onnx` |
+| Live webcam demo (OpenCV window) | `python -m ssl_recognition.infer --run runs/final_tf_all_official --onnx` |
+| Browser app, laptop and phone | `python -m app.server --run runs/final_tf_all_official --https` |
 | Benchmark this machine | `python scripts/benchmark_cpu.py --run runs/final_tf_all_official` |
 
 Every config under `configs/` reproduces one row of the results table; the run folder it
@@ -101,6 +102,24 @@ writes holds `config.json`, `labels.json`, `best.pt`, `history.json` and `result
 
 Data layout: `data/landmarks/<label>/<signer>_<split>_<id>.npz`, one small file per clip.
 Nothing under `data/` or `runs/` is committed.
+
+## Browser app
+
+`app/server.py` serves a single-page interface (`app/static/index.html`) that works in a
+laptop browser and on a phone over the same Wi-Fi. The browser captures the camera and
+streams small JPEG frames over a WebSocket; the laptop runs MediaPipe and the classifier and
+streams back the top-3 signs plus the skeleton for the overlay. Features:
+
+- Large Arabic and English result with a confidence bar; a sign is marked **stable** only after
+  it stays on top for several consecutive predictions, which stops flicker.
+- **Practice mode**: pick a word, sign it, get a green confirmation, move to the next; progress
+  across the 100 signs.
+- **Word list** with search in Arabic, English or sign ID.
+- Front/back camera switch and mirror toggle for phones.
+- `--https` creates a self-signed certificate (phones refuse camera access over plain HTTP);
+  accept the browser warning once. Windows will ask once to allow Python through the firewall.
+
+Install the extras with `pip install -e ".[app]"`.
 
 ## Results
 
