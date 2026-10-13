@@ -35,6 +35,12 @@ def test_labels_and_one_frame():
     assert {"top", "hands", "lm", "ms"} <= set(msg)
     assert msg["hands"] == 0 and msg["top"] == []
 
+    with client.websocket_connect("/ws_feat") as ws:
+        ws.send_text(json.dumps({"f": [0.0] * 155}))
+        msg = json.loads(ws.receive_text())
+    assert msg["hands"] == 0 and msg["top"] == [] and "ms" in msg
+    assert client.get("/models/holistic_landmarker.task").status_code == 200
+
     if Path("data/landmarks/0071").is_dir():
         ref = client.get("/api/ref/0071").json()
         assert ref["frames"] and len(ref["frames"][0]["pose"]) == 9

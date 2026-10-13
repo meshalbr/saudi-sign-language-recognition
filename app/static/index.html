@@ -90,6 +90,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
     <div class="toolbar">
       <button class="btn ghost" id="btnFlip" title="switch front/back camera">Switch camera</button>
       <button class="btn ghost" id="btnMirror">Mirror</button>
+      <button class="btn ghost" id="btnMode" title="where MediaPipe runs">Mode: auto</button>
     </div>
   </section>
 
@@ -204,40 +205,83 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   function markDone(){ done.add(target.id); $('pProg').textContent=`${done.size} / ${labels.length} done`; $('pStatus').textContent='Correct ✓'; $('pStatus').className='status ok'; $('tabPractice').classList.remove('flash'); void $('tabPractice').offsetWidth; $('tabPractice').classList.add('flash'); setTimeout(nextTarget,1200); }
 
   // Camera
+  let landmarker=null, fastMode=false;
+  async function loadLandmarker(){
+    // Fast path: MediaPipe runs in the browser (WebGL on the device GPU); only 155 numbers go to the laptop.
+    try{
+      const vision=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/vision_bundle.mjs');
+      const files=await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm');
+      landmarker=await vision.HolisticLandmarker.createFromOptions(files,{baseOptions:{modelAssetPath:'/models/holistic_landmarker.task',delegate:'GPU'},runningMode:'VIDEO',minPoseDetectionConfidence:0.5,minPoseLandmarksConfidence:0.5,minHandLandmarksConfidence:0.5});
+      fastMode=true; $('cSrv').textContent='browser landmarks'; $('btnMode').textContent='Mode: browser';
+    }catch(e){ console.warn('browser landmarker unavailable, using server path:',e); fastMode=false; $('btnMode').textContent='Mode: server'; }
+  }
   async function enableCamera(){
     try{
       if(stream) stream.getTracks().forEach(t=>t.stop());
       stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:640},height:{ideal:480}},audio:false});
       video.srcObject=stream; await video.play();
       $('gate').hidden=true; $('cCam').textContent='camera on'; $('cCam').classList.add('on');
+      if(!landmarker&&!fastMode){ $('cSrv').textContent='loading model…'; await loadLandmarker(); }
       connect();
     }catch(e){ $('gateErr').textContent='Camera blocked: '+e.message+(location.protocol==='http:'&&location.hostname!=='localhost'?' (phones need the https address)':''); }
   }
+
+  // Feature vector identical to ssl_recognition.landmarks.features_from_arrays (155 numbers)
+  const POSE_IDX=[0,11,12,13,14,15,16,23,24];
+  function featuresFromResult(res){
+    const f=new Float32Array(155);
+    const pose=(res.poseLandmarks&&res.poseLandmarks[0])||null; if(!pose||pose.length<33) return {f,lm:{pose:[],left:[],right:[]}};
+    const l=pose[11], r=pose[12]; const cx=(l.x+r.x)/2, cy=(l.y+r.y)/2, cz=(l.z+r.z)/2; let s=Math.hypot(l.x-r.x,l.y-r.y); if(!(s>1e-3)) s=1;
+    POSE_IDX.forEach((pi,k)=>{ const p=pose[pi]; f[k*3]=(p.x-cx)/s; f[k*3+1]=(p.y-cy)/s; f[k*3+2]=(p.z-cz)/s; });
+    const left=(res.leftHandLandmarks&&res.leftHandLandmarks[0])||null, right=(res.rightHandLandmarks&&res.rightHandLandmarks[0])||null;
+    if(left&&left.length>=21){ left.forEach((p,k)=>{ f[27+k*3]=(p.x-cx)/s; f[27+k*3+1]=(p.y-cy)/s; f[27+k*3+2]=(p.z-cz)/s; }); f[153]=1; }
+    if(right&&right.length>=21){ right.forEach((p,k)=>{ f[90+k*3]=(p.x-cx)/s; f[90+k*3+1]=(p.y-cy)/s; f[90+k*3+2]=(p.z-cz)/s; }); f[154]=1; }
+    const pts=a=>a?a.map(p=>[p.x,p.y]):[];
+    return {f,lm:{pose:pts(pose),left:pts(left),right:pts(right)}};
+  }
+  let lastTs=-1;
+  function fastStep(){
+    if(!fastMode||!landmarker||!ws||ws.readyState!==1||inflight||!video.videoWidth||video.readyState<2) return;
+    let ts=performance.now(); if(ts<=lastTs) ts=lastTs+1; lastTs=ts;
+    const res=landmarker.detectForVideo(video,ts);
+    const {f,lm}=featuresFromResult(res);
+    drawLandmarks(lm); lastLm=lm;
+    inflight=true; ws.send(JSON.stringify({f:Array.from(f,v=>Math.round(v*10000)/10000)}));
+  }
+  let lastLm={pose:[],left:[],right:[]};
   $('btnEnable').addEventListener('click',enableCamera);
   $('btnFlip').addEventListener('click',()=>{facing=facing==='user'?'environment':'user'; stage.classList.toggle('mirror',facing==='user'); if(stream) enableCamera();});
   $('btnMirror').addEventListener('click',()=>stage.classList.toggle('mirror'));
+  // Mode: browser (MediaPipe in the page, GPU) vs server (JPEG frames to the laptop). Compare the fps chip.
+  $('btnMode').addEventListener('click',async()=>{
+    if(fastMode){ fastMode=false; $('btnMode').textContent='Mode: server'; }
+    else { if(!landmarker){ $('btnMode').textContent='Mode: loading…'; await loadLandmarker(); } fastMode=!!landmarker; $('btnMode').textContent=fastMode?'Mode: browser':'Mode: server (no GPU model)'; }
+    if(ws){ ws.onclose=null; ws.close(); } inflight=false; if(stream) connect();
+  });
 
   // WebSocket streaming
   function connect(){
-    const proto=location.protocol==='https:'?'wss':'ws'; ws=new WebSocket(`${proto}://${location.host}/ws`);
+    const proto=location.protocol==='https:'?'wss':'ws'; ws=new WebSocket(`${proto}://${location.host}/${fastMode?'ws_feat':'ws'}`);
     ws.binaryType='arraybuffer';
-    ws.onopen=()=>{inflight=false; $('cSrv').textContent='connected'; $('cSrv').classList.add('on'); pump();};
+    ws.onopen=()=>{inflight=false; $('cSrv').textContent=fastMode?'browser landmarks · connected':'server landmarks · connected'; $('cSrv').classList.add('on'); pump();};
     ws.onmessage=e=>{inflight=false; onResult(JSON.parse(e.data)); pump();};
     ws.onclose=()=>{$('cSrv').textContent='disconnected'; $('cSrv').classList.remove('on'); setTimeout(()=>{if(stream)connect();},1500);};
   }
   function pump(){
+    if(fastMode){ fastStep(); return; }
     if(!ws||ws.readyState!==1||inflight||!video.videoWidth) return;
     const w=320, h=Math.round(320*video.videoHeight/video.videoWidth); sendCanvas.width=w; sendCanvas.height=h;
     sctx.drawImage(video,0,0,w,h);
     sendCanvas.toBlob(b=>{ if(!b||ws.readyState!==1)return; inflight=true; b.arrayBuffer().then(buf=>ws.send(buf)); },'image/jpeg',0.65);
   }
-  setInterval(()=>{ if(!inflight) pump(); },50);  // up to 20 fps; backpressure via inflight
+  setInterval(()=>{ if(!inflight) pump(); },fastMode?16:50);  // backpressure via inflight
+  (function loop(){ if(fastMode&&!inflight) pump(); requestAnimationFrame(loop); })();  // fast path: every displayed frame
 
   // Results
   function onResult(r){
     fpsN++; const now=performance.now(); if(now-fpsT>1000){ $('cFps').textContent=`${(fpsN*1000/(now-fpsT)).toFixed(0)} fps · ${r.ms} ms`; fpsN=0; fpsT=now; }
     $('cHands').textContent='hands '+r.hands; $('cHands').classList.toggle('on',r.hands>0);
-    drawLandmarks(r.lm);
+    if(r.lm) drawLandmarks(r.lm);
     const top=r.top||[]; const best=top[0];
     if(best){ if(best.id===stable.id){stable.count++;} else {stable={id:best.id,count:1,fired:false};} } else { stable={id:null,count:0,fired:false}; }
     const isStable=best&&best.p>=THRESH&&stable.count>=STABLE_N;

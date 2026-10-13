@@ -158,6 +158,50 @@ def landmarks_payload(result) -> dict:
     }
 
 
+@app.get("/models/holistic_landmarker.task")
+def model_file():
+    """Serve the MediaPipe model so the browser can run landmarking itself (fast path)."""
+    from ssl_recognition.landmarks import DEFAULT_MODEL
+
+    return FileResponse(DEFAULT_MODEL, media_type="application/octet-stream")
+
+
+@app.websocket("/ws_feat")
+async def ws_feat(websocket: WebSocket):
+    """Fast path: the browser runs MediaPipe and sends 155-d feature rows; we only classify."""
+    await websocket.accept()
+    pred = predictor()
+    names = STATE["labels"]
+    buf: collections.deque = collections.deque(maxlen=STATE["window"])
+    frame_i = 0
+    top: list[dict] = []
+    try:
+        while True:
+            msg = json.loads(await websocket.receive_text())
+            t = time.perf_counter()
+            feat = np.asarray(msg["f"], dtype=np.float32)
+            if feat.shape != (155,):
+                continue
+            buf.append(feat)
+            frame_i += 1
+            hands = int(feat[-2] + feat[-1])
+            if frame_i % STATE["stride"] == 0 and len(buf) >= STATE["window"] // 2:
+                x = np.stack(buf)
+                if (x[:, -2] + x[:, -1] > 0).mean() > 0.5:
+                    p = pred.predict(x)
+                    order = np.argsort(-p)[:3]
+                    top = [{**names[i], "p": round(float(p[i]), 3)} for i in order]
+                else:
+                    top = []
+            await websocket.send_text(
+                json.dumps(
+                    {"top": top, "hands": hands, "ms": round((time.perf_counter() - t) * 1000, 1)}
+                )
+            )
+    except WebSocketDisconnect:
+        pass
+
+
 @app.websocket("/ws")
 async def ws(websocket: WebSocket):
     await websocket.accept()
