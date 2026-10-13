@@ -555,7 +555,7 @@ def main() -> None:
     import uvicorn
 
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--run", default="runs/final_tf_all_official")
+    ap.add_argument("--run", default="runs/final_v2")
     ap.add_argument("--names", default="data/karsl_labels.json")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--http-port", type=int, default=8000)

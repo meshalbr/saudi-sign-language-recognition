@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-RUN = Path("runs/final_tf_all_official")
+RUN = Path("runs/final_v2")
 
 
 @pytest.mark.skipif(

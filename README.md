@@ -91,10 +91,10 @@ python scripts/download_models.py             # MediaPipe holistic model, 14 MB,
 | Extract landmarks from videos | `python scripts/extract_landmarks.py --videos data/videos --signer-from-name --workers 3` |
 | Train the deployment model (all signers, official split) | `python -m ssl_recognition.train --config configs/final_tf_all_official.yaml` |
 | Train a held-out-signer fold | `python -m ssl_recognition.train --config configs/p2_s03_tf_strong.yaml --test-signer s03` |
-| Export to ONNX (with parity check) | `python scripts/export_onnx.py --run runs/final_tf_all_official` |
-| Live webcam demo (OpenCV window) | `python -m ssl_recognition.infer --run runs/final_tf_all_official --onnx` |
-| Browser app, laptop and phone | `python -m app.server --run runs/final_tf_all_official --https` |
-| Benchmark this machine | `python scripts/benchmark_cpu.py --run runs/final_tf_all_official` |
+| Export to ONNX (with parity check) | `python scripts/export_onnx.py --run runs/final_v2` |
+| Live webcam demo (OpenCV window) | `python -m ssl_recognition.infer --run runs/final_v2 --onnx` |
+| Browser app, laptop and phone | `python -m app.server --run runs/final_v2 --https` |
+| Benchmark this machine | `python scripts/benchmark_cpu.py --run runs/final_v2` |
 
 Every config under `configs/` reproduces one row of the results table; the run folder it
 writes holds `config.json`, `labels.json`, `best.pt`, `history.json` and `result.json`.
@@ -134,7 +134,8 @@ here as they land.
 | 2026-10-13 | KArSL-100, leave-one-signer-out, baseline features | mean of 3 folds (15,117 test clips) | 0.670 | 0.884 | signer-independent: s03 0.683, s02 0.641, s01 0.687 |
 | 2026-10-13 | KArSL-100, leave-one-signer-out, GRU + phase-2 features | mean of 3 folds | 0.778 | 0.946 | wrist-local hand coordinates + velocity + hand-block dropout + dropout 0.5 + weight decay |
 | 2026-10-13 | KArSL-100, leave-one-signer-out, **Transformer** + phase-2 features | mean of 3 folds | **0.833** | **0.960** | 2-layer encoder, 450k params: s03 0.836, s02 0.824, s01 0.840 |
-| 2026-10-13 | KArSL-100, all 3 signers, Transformer (deployment model) | official (2,400 test clips) | 0.998 | 1.000 | `runs/final_tf_all_official`, used by the live demo; ONNX output verified at 0.998 on a 400-clip sample |
+| 2026-10-13 | KArSL-100, cleaned landmarks + gap filling, leave-one-signer-out | mean of 3 folds | **0.837** | 0.959 | +2.7 points on the 15 badly tracked signs; see `reports/data_quality.md` |
+| 2026-10-13 | KArSL-100, all 3 signers, Transformer (previous deployment model) | official (2,400 test clips) | 0.998 | 1.000 | `runs/final_v2`, used by the live demo; ONNX output verified at 0.998 on a 400-clip sample |
 
 The gap between seen and unseen signers is the project's central finding: the same model is
 near perfect on signers it has seen and far lower on a new person. Validation accuracy hits

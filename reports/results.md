@@ -83,3 +83,27 @@ Reading of phase 1: with the signer seen in training the model is near perfect; 
 | 2026-10-12 | BiGRU classifier, ONNX Runtime CPU | 3.3 ms | 12 ms | same conditions, 2.1 MB model, parity 4.8e-7 |
 | 2026-10-13 | Transformer classifier, PyTorch | 3.0 ms | 3.7 ms | one training run in the background |
 | 2026-10-13 | Transformer classifier, ONNX Runtime CPU | 1.6 ms | 2.1 ms | 1.98 MB model, parity 1.7e-6 |
+
+## Data quality cleanup (2026-10-13)
+
+MediaPipe lost the hands mid-sign in 22% of KArSL clips (median gap 2 frames); 15 signs had
+under 95% hand coverage, worst near the face (pharynx 68%, thermometer 81%). See
+`reports/data_quality.md`. Fixes: re-extracted those 15 signs at full resolution with detection
+confidence 0.3 (coverage +2 to 3 points each), and `fill_gaps: 8` interpolates hands lost for up
+to 8 frames, in training, inference and the reference display.
+
+| Fold | Before (p2 Transformer) | After (p3, cleaned + fill) |
+|---|---|---|
+| s03 | 0.836 | 0.839 |
+| s02 | 0.824 | 0.821 (re-extraction alone: 0.810) |
+| s01 | 0.840 | **0.851** |
+| mean top-1 / top-5 | 0.833 / 0.960 | **0.837 / 0.959** |
+
+| Held-out accuracy, all 3 folds | Before | After |
+|---|---|---|
+| the 15 weak signs (2,270 clips) | 82.6% | **85.3%** |
+| the other 85 signs (12,847 clips) | 83.5% | 83.4% |
+
+Reading: the overall mean barely moves, but the cleanup does what it targets, +2.7 points on
+the badly tracked signs with no cost elsewhere. Deployment model `final_v2` (all signers,
+official split): 0.997 top-1.
