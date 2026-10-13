@@ -89,11 +89,14 @@ python scripts/download_models.py             # MediaPipe holistic model, 14 MB,
 | Record your own clips | `python -m ssl_recognition.record --label hello --signer meshal --clips 10` |
 | Prepare KArSL (after downloading the public archives into `data/raw`) | `python scripts/prepare_karsl.py --signers 01 02 03 --ranges 0071-0170` |
 | Extract landmarks from videos | `python scripts/extract_landmarks.py --videos data/videos --signer-from-name --workers 3` |
-| Train, official split | `python -m ssl_recognition.train --config configs/karsl100_s01.yaml` |
-| Train, held-out signer | `python -m ssl_recognition.train --config configs/baseline.yaml --test-signer s03` |
-| Export to ONNX (with parity check) | `python scripts/export_onnx.py --run runs/karsl100_s01` |
-| Live webcam demo | `python -m ssl_recognition.infer --run runs/karsl100_s01 --onnx` |
-| Benchmark this machine | `python scripts/benchmark_cpu.py --run runs/karsl100_s01` |
+| Train the deployment model (all signers, official split) | `python -m ssl_recognition.train --config configs/final_tf_all_official.yaml` |
+| Train a held-out-signer fold | `python -m ssl_recognition.train --config configs/p2_s03_tf_strong.yaml --test-signer s03` |
+| Export to ONNX (with parity check) | `python scripts/export_onnx.py --run runs/final_tf_all_official` |
+| Live webcam demo | `python -m ssl_recognition.infer --run runs/final_tf_all_official --onnx` |
+| Benchmark this machine | `python scripts/benchmark_cpu.py --run runs/final_tf_all_official` |
+
+Every config under `configs/` reproduces one row of the results table; the run folder it
+writes holds `config.json`, `labels.json`, `best.pt`, `history.json` and `result.json`.
 | Tests and lint | `pytest -q && ruff check .` |
 
 Data layout: `data/landmarks/<label>/<signer>_<split>_<id>.npz`, one small file per clip.
@@ -112,6 +115,7 @@ here as they land.
 | 2026-10-13 | KArSL-100, leave-one-signer-out, baseline features | mean of 3 folds (15,117 test clips) | 0.670 | 0.884 | signer-independent: s03 0.683, s02 0.641, s01 0.687 |
 | 2026-10-13 | KArSL-100, leave-one-signer-out, GRU + phase-2 features | mean of 3 folds | 0.778 | 0.946 | wrist-local hand coordinates + velocity + hand-block dropout + dropout 0.5 + weight decay |
 | 2026-10-13 | KArSL-100, leave-one-signer-out, **Transformer** + phase-2 features | mean of 3 folds | **0.833** | **0.960** | 2-layer encoder, 450k params: s03 0.836, s02 0.824, s01 0.840 |
+| 2026-10-13 | KArSL-100, all 3 signers, Transformer (deployment model) | official (2,400 test clips) | 0.998 | 1.000 | `runs/final_tf_all_official`, used by the live demo; ONNX output verified at 0.998 on a 400-clip sample |
 
 The gap between seen and unseen signers is the project's central finding: the same model is
 near perfect on signers it has seen and far lower on a new person. Validation accuracy hits

@@ -55,6 +55,12 @@ Transformer on all folds:
 
 The Transformer beats the GRU on every fold, by 5.5 points on average, with fewer parameters (450k vs 586k), faster training (24 vs 28 min) and much lower test loss (0.66 vs about 1.0), which means its confidence is better calibrated. Its best epochs are 38 to 40, so it was still improving at the end of the schedule; a longer schedule is a cheap next experiment. Final signer-independent result for KArSL-100 after one day of work: **0.833 top-1 / 0.960 top-5**, from 0.670 / 0.884 with the first baseline.
 
+## Deployment model
+
+| Date | Config | Data | Top-1 | Top-5 | Notes |
+|---|---|---|---|---|---|
+| 2026-10-13 | final_tf_all_official | KArSL-100, signers 01+02+03, official split (10814 train / 1903 val / 2400 test) | 0.998 | 1.000 | Transformer, phase-2 features, strong regularisation; 31 min CPU; ONNX 1.98 MB, parity 1.4e-6; the Predictor + ONNX path scores 0.998 on a 400-clip test sample |
+
 ## Summary of the signer-gap work
 
 | Step | Mean LOSO top-1 | Gain |
