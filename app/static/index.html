@@ -77,6 +77,10 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
 .state #btnDone{margin-left:auto}
 .btn.small{padding:4px 10px;font-size:12px}
 @keyframes pulse{50%{opacity:.3}}
+.teach{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:12px;margin-top:4px}
+.tg{display:flex;gap:8px;align-items:flex-start;font-size:14px;cursor:pointer}
+.tg input{accent-color:var(--teal);width:18px;height:18px;margin-top:1px}
+.seg2{display:inline-grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;border-radius:10px;background:var(--panel2)}
 .flash{animation:flash .6s ease-out}
 @keyframes flash{0%{box-shadow:0 0 0 0 rgba(61,214,140,.9)}100%{box-shadow:0 0 0 24px rgba(61,214,140,0)}}
 .muted{color:var(--muted);font-size:13px}
@@ -131,7 +135,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
         <button class="segbtn" id="showFinal" aria-pressed="true">Final answer</button>
         <button class="segbtn" id="showLive" aria-pressed="false">Live guesses</button>
       </div>
-      <div class="state" id="rState"><span class="dot"></span><span id="rStateText">Ready. Sign, then lower your hands.</span><button class="btn ghost small" id="btnDone">Done</button></div>
+      <div class="state" id="rState"><span class="dot"></span><span id="rStateText">Ready. Raise your hands to sign, lower them when done.</span><button class="btn ghost small" id="btnDone">Done</button></div>
       <div class="word" id="rWord">—</div>
       <div class="en" id="rEn">Show your hands to the camera</div>
       <div class="id" id="rId"></div>
@@ -154,6 +158,15 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
       <div class="row">
         <span class="muted" id="pProg">0 / 100 done</span>
         <span><button class="btn ghost" id="btnSkip">Skip</button> <button class="btn" id="btnNext">Next</button></span>
+      </div>
+      <div class="teach">
+        <label class="tg"><input type="checkbox" id="teachOn"> <span><b>Teach mode</b>: save each attempt as my version of this word</span></label>
+        <div class="row"><span class="muted" id="teachCount">Taught: 0 examples of this word, 0 in total</span></div>
+        <div class="row">
+          <button class="btn" id="btnTrain">Train on my examples</button>
+          <span class="seg2"><button class="segbtn" id="mBase" aria-pressed="true">Base model</button><button class="segbtn" id="mPersonal" aria-pressed="false">My model</button></span>
+        </div>
+        <div class="muted" id="trainStatus">Record about 3 examples of each word you use, then train (about 3 to 5 minutes).</div>
       </div>
     </div>
 
@@ -230,7 +243,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   }
 
   // Practice
-  function setTarget(l){target=l; $('pAr').textContent=l.ar||'—'; $('pEn').textContent=l.en; $('pId').textContent='sign '+l.id; $('pStatus').textContent='Waiting…'; $('pStatus').className='status'; $('pBar').style.width='0'; showReference(l.id,$('pVid'),$('pCv')); renderList($('search').value);}
+  function setTarget(l){target=l; $('pAr').textContent=l.ar||'—'; $('pEn').textContent=l.en; $('pId').textContent='sign '+l.id; $('pStatus').textContent='Waiting…'; $('pStatus').className='status'; $('pBar').style.width='0'; showReference(l.id,$('pVid'),$('pCv')); renderList($('search').value); if(typeof refreshUser==='function') refreshUser();}
   function nextTarget(){ if(!labels.length)return; for(let k=0;k<labels.length;k++){ptr=(ptr+1)%labels.length; if(!done.has(labels[ptr].id))break;} setTarget(labels[ptr]); }
   $('btnNext').addEventListener('click',nextTarget); $('btnSkip').addEventListener('click',nextTarget);
   function markDone(){ done.add(target.id); $('pProg').textContent=`${done.size} / ${labels.length} done`; $('pStatus').textContent='Correct ✓'; $('pStatus').className='status ok'; $('tabPractice').classList.remove('flash'); void $('tabPractice').offsetWidth; $('tabPractice').classList.add('flash'); setTimeout(nextTarget,1200); }
@@ -331,7 +344,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
     phoneWs.onmessage=e=>{
       if(typeof e.data!=='string'){ // preview JPEG from the phone
         const u=URL.createObjectURL(new Blob([e.data],{type:'image/jpeg'})); $('phoneView').src=u; if(lastBlobUrl) URL.revokeObjectURL(lastBlobUrl); lastBlobUrl=u;
-        if(!$('pair').hidden){ $('pair').hidden=true; } $('phoneView').hidden=false; $('cCam').textContent='phone camera'; $('cCam').classList.add('on'); return; }
+        if(!$('pair').hidden){ $('pair').hidden=true; } $('phoneView').hidden=false; video.hidden=true; $('cCam').textContent='phone camera'; $('cCam').classList.add('on'); return; }
       const r=JSON.parse(e.data); $('cSrv').textContent='phone connected';
       if(r.lm){ drawPhoneLm(r.lm); r.lm=null; } onResult(r);
     };
@@ -346,9 +359,24 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   $('btnPhone').addEventListener('click',async()=>{
     $('gate').hidden=true; $('pair').hidden=false; $('btnShowQR').hidden=false;
     try{ const info=await fetch('/api/info').then(r=>r.json()); showQR(info.camera_url); }catch(e){ $('pairUrl').textContent='Could not read the laptop address.'; }
-    if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } if(ws){ ws.onclose=null; ws.close(); ws=null; }
+    if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } if(ws){ ws.onclose=null; ws.close(); ws=null; } video.srcObject=null; video.hidden=true; $('cCam').textContent='waiting for phone video'; $('cCam').classList.remove('on');
     connectDisplay();
   });
+
+  // Teach mode: save the user's own signs, fine-tune, switch models
+  let userCounts={};
+  async function refreshUser(){ try{ const u=await fetch('/api/user').then(r=>r.json()); userCounts=u.counts||{}; const tot=Object.values(userCounts).reduce((a,b)=>a+b,0);
+      $('teachCount').textContent=`Taught: ${target?(userCounts[target.id]||0):0} examples of this word, ${tot} in total`;
+      $('mBase').setAttribute('aria-pressed',u.model==='base'); $('mPersonal').setAttribute('aria-pressed',u.model==='personal');
+      const st=u.status||{}; if(st.state==='training') $('trainStatus').textContent=`Training… epoch ${st.epoch} of ${st.epochs}. Keep this page open.`;
+      else if(st.state==='done') $('trainStatus').textContent='Done: '+st.message+'. Now using your model.';
+      else if(st.state==='error') $('trainStatus').textContent='Training failed: '+st.message;
+      return st.state; }catch(e){ return 'error'; } }
+  async function teachSave(){ if(!$('teachOn').checked||!target) return; try{ const r=await fetch('/api/save/'+target.id,{method:'POST'}).then(r=>r.json()); if(r.count){ $('pStatus').textContent+=` · saved as example ${r.count}`; } }catch(e){} refreshUser(); }
+  $('btnTrain').addEventListener('click',async()=>{ const r=await fetch('/api/personalise',{method:'POST'}).then(r=>r.json()); if(!r.started){ $('trainStatus').textContent='Already training.'; } const poll=setInterval(async()=>{ const s=await refreshUser(); if(s!=='training') clearInterval(poll); },3000); refreshUser(); });
+  $('mBase').addEventListener('click',async()=>{ await fetch('/api/model/base',{method:'POST'}); refreshUser(); });
+  $('mPersonal').addEventListener('click',async()=>{ const r=await fetch('/api/model/personal',{method:'POST'}); if(!r.ok) $('trainStatus').textContent='No personal model yet. Record examples and train first.'; refreshUser(); });
+  refreshUser();
   $('btnShowQR').addEventListener('click',()=>{ $('pair').hidden=!$('pair').hidden; });
   $('btnPairCancel').addEventListener('click',()=>{ $('pair').hidden=true; $('gate').hidden=false; if(phoneWs){ const w=phoneWs; phoneWs=null; w.onclose=null; w.close(); } });
   setShow(showMode);
@@ -371,9 +399,9 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
     if(r.lm) drawLandmarks(r.lm);
     // Final-answer mode: state line + one word per completed sign
     if(r.final){ setState('got',`Got it (${r.final_frames} frames). Sign the next word.`); if(showMode==='final') showFinal(r.final);
-      if(mode==='practice'&&target&&!done.has(target.id)){ const f=r.final[0]; if(f.id===target.id) markDone(); else { $('pStatus').textContent=`You signed: ${f.ar||f.en}. Try again.`; $('pStatus').className='status'; } } }
+      if(mode==='practice'&&target){ teachSave(); } if(mode==='practice'&&target&&!done.has(target.id)){ const f=r.final[0]; if(f.id===target.id) markDone(); else { $('pStatus').textContent=`You signed: ${f.ar||f.en}. Try again.`; $('pStatus').className='status'; } } }
     else if(r.recording>0) setState('rec',`Recording sign… ${r.recording} frames. Lower your hands when done.`);
-    else if(!$('rState').classList.contains('got')) setState('','Ready. Sign, then lower your hands.');
+    else if(!$('rState').classList.contains('got')) setState('','Ready. Raise your hands to sign, lower them when done.');
     if(showMode==='final'){ return; }
     const top=r.top||[]; const best=top[0];
     if(best){ if(best.id===stable.id){stable.count++;} else {stable={id:best.id,count:1,fired:false};} } else { stable={id:null,count:0,fired:false}; }

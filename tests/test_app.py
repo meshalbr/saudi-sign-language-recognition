@@ -67,16 +67,35 @@ def test_labels_and_one_frame():
     assert client.get("/api/ref/9999").status_code == 404
 
 
+def _frame(wrist_y: float | None, hand: bool = True) -> np.ndarray:
+    f = np.zeros(155, np.float32)
+    if wrist_y is not None:
+        f[:27] = 0.1  # some pose present
+        f[16] = f[19] = wrist_y
+    if hand:
+        f[-1] = 1.0
+    return f
+
+
 def test_segmenter_keeps_short_dropouts_inside_one_sign():
     from app.server import Segmenter
 
-    hand = np.zeros(155, np.float32)
-    hand[-1] = 1.0
-    none = np.zeros(155, np.float32)
+    up, gone, rest = _frame(0.5), _frame(None, hand=False), _frame(2.3)
     seg = Segmenter(gap_ms=700)
     # "skull": 20 frames, 4-frame drop-out between the two movements, 25 frames, then hands down
-    stream = [hand] * 20 + [none] * 4 + [hand] * 25 + [none] * 30
-    outs = [seg.push(f, k * 33.3) for k, f in enumerate(stream)]
-    finals = [o for o in outs if o is not None]
+    stream = [up] * 20 + [gone] * 4 + [up] * 25 + [rest] * 30
+    finals = [o for o in (seg.push(f, k * 33.3) for k, f in enumerate(stream)) if o is not None]
     assert len(finals) == 1
-    assert len(finals[0]) == 49  # both movements plus the short gap, trailing gap trimmed
+    assert len(finals[0]) == 49  # both movements plus the short gap, trailing rest trimmed
+
+
+def test_segmenter_ignores_the_raise_from_rest():
+    from app.server import Segmenter
+
+    seg = Segmenter(gap_ms=700)
+    rest, rising, up = _frame(2.3), _frame(1.9), _frame(0.4)
+    # hands visible in the lap, raised through the rest line, signing, lowered back to the lap
+    stream = [rest] * 30 + [rising] * 6 + [up] * 30 + [rising] * 6 + [rest] * 40
+    finals = [o for o in (seg.push(f, k * 33.3) for k, f in enumerate(stream)) if o is not None]
+    assert len(finals) == 1
+    assert len(finals[0]) == 30  # only the frames above the rest line

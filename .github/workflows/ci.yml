@@ -11,6 +11,6 @@ jobs:
       - name: Install CPU torch and package
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -e ".[dev]"
+          pip install -e ".[dev,app]"
       - run: ruff check .
       - run: pytest -q

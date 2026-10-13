@@ -53,9 +53,12 @@ def predictor() -> Predictor:
     return STATE["predictor"]
 
 
+NO_CACHE = {"Cache-Control": "no-store"}
+
+
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html")
+    return FileResponse(STATIC / "index.html", headers=NO_CACHE)
 
 
 @app.get("/api/labels")
@@ -166,40 +169,90 @@ def model_file():
     return FileResponse(DEFAULT_MODEL, media_type="application/octet-stream")
 
 
-class Segmenter:
-    """Cuts the stream into single signs. A sign starts when hands appear and ends when no hand
-    has been seen for ``gap_ms`` (time-based, so it behaves the same at 10 or 30 fps), or when the
-    user presses Done. Short drop-outs inside a sign (e.g. between the two movements of "skull")
-    are kept inside the sign."""
+LAST_SIGN: dict = {"x": None}
+REST_Y = 1.6  # shoulder widths below the shoulder line; KArSL hands start above ~1.3, hips ~2.5
+WRIST_Y = (16, 19)  # feature indices of the two wrists' y (pose block positions 5 and 6)
 
-    def __init__(self, gap_ms: float = 700, min_len: int = 8, max_len: int = 180):
-        self.gap_ms, self.min_len, self.max_len = gap_ms, min_len, max_len
+
+def is_active(feat: np.ndarray, rest_y: float = REST_Y) -> bool:
+    """Signing = at least one hand detected and a wrist raised above the rest line."""
+    if feat[-2] + feat[-1] <= 0 or not feat[:27].any():
+        return False
+    return min(feat[WRIST_Y[0]], feat[WRIST_Y[1]]) < rest_y
+
+
+class Segmenter:
+    """Cuts the stream into single signs.
+
+    A sign starts when a wrist rises above the rest line (so raising your hand from your lap is
+    not part of the sign, matching how KArSL clips begin) and ends when both hands have been
+    below the line or out of view for ``gap_ms``. Short drop-outs inside a sign, such as the pause
+    between the two movements of "skull", stay inside the sign. Done ends it immediately."""
+
+    def __init__(self, gap_ms: float = 700, min_len: int = 8, max_len: int = 180, rest_y=REST_Y):
+        self.gap_ms, self.min_len, self.max_len, self.rest_y = gap_ms, min_len, max_len, rest_y
         self.seg: list[np.ndarray] = []
-        self.last_hand_ms: float | None = None
+        self.last_active_ms: float | None = None
+        self.last: np.ndarray | None = None  # last completed sign, for saving user examples
 
     def push(self, feat: np.ndarray, t_ms: float) -> np.ndarray | None:
-        if feat[-2] + feat[-1] > 0:
+        if is_active(feat, self.rest_y):
             self.seg.append(feat)
-            self.last_hand_ms = t_ms
+            self.last_active_ms = t_ms
             if len(self.seg) >= self.max_len:
                 return self.flush()
         elif self.seg:
-            self.seg.append(feat)  # keep the gap frames so timing inside the sign is preserved
-            if self.last_hand_ms is not None and t_ms - self.last_hand_ms >= self.gap_ms:
+            self.seg.append(feat)
+            if self.last_active_ms is not None and t_ms - self.last_active_ms >= self.gap_ms:
                 return self.flush()
         return None
 
     def flush(self) -> np.ndarray | None:
-        seg, self.seg, self.last_hand_ms = self.seg, [], None
-        # trim trailing no-hand frames
-        while seg and seg[-1][-2] + seg[-1][-1] <= 0:
+        seg, self.seg, self.last_active_ms = self.seg, [], None
+        while seg and not is_active(seg[-1], self.rest_y):  # trim the lowering at the end
             seg.pop()
-        return np.stack(seg) if len(seg) >= self.min_len else None
+        if len(seg) < self.min_len:
+            return None
+        self.last = np.stack(seg)
+        LAST_SIGN["x"] = self.last
+        return self.last
 
 
 def top3(pred, names, x) -> list[dict]:
     p = pred.predict(x)
     return [{**names[i], "p": round(float(p[i]), 3)} for i in np.argsort(-p)[:3]]
+
+
+WINDOW_MARGIN = 0.15  # a shorter window must beat the full sign by this much confidence
+
+
+def best_window(
+    pred, names, x: np.ndarray, margin: float | None = None
+) -> tuple[list[dict], tuple[int, int]]:
+    """Classify the sub-window of a completed sign that the model is most sure about.
+
+    People raise their hand to the start position before a sign and lower it afterwards; KArSL
+    clips contain neither. Trying start points in the first part of the segment and end points
+    in the last part, and keeping the most confident window, drops that travel automatically.
+    """
+    n = len(x)
+    if n < 16:
+        return top3(pred, names, x), (0, n)
+    min_len = max(12, int(n * 0.4))
+    starts = sorted({int(v) for v in np.linspace(0, int(n * 0.45), 10)})
+    ends = sorted({int(v) for v in np.linspace(int(n * 0.65), n, 7)})
+    margin = WINDOW_MARGIN if margin is None else margin
+    full = pred.predict(x)
+    best, best_conf, span = full, float(full.max()) + margin, (0, n)
+    for s0 in starts:
+        for e0 in ends:
+            if e0 - s0 < min_len:
+                continue
+            p = pred.predict(x[s0:e0])
+            if p.max() > best_conf:
+                best, best_conf, span = p, float(p.max()), (s0, e0)
+    order = np.argsort(-best)[:3]
+    return [{**names[i], "p": round(float(best[i]), 3)} for i in order], span
 
 
 # --- phone-as-camera, laptop-as-display relay -------------------------------------------------
@@ -247,14 +300,16 @@ class Session:
         if self.frame_i % STATE["stride"] == 0 and len(self.buf) >= STATE["window"] // 2:
             x = np.stack(self.buf)
             ok = (x[:, -2] + x[:, -1] > 0).mean() > 0.5
-            self.top = top3(self.pred, self.names, x) if ok else []
+            self.top = top3(predictor(), STATE["labels"], x) if ok else []
         if RELAY["end"]:
             RELAY["end"], end = False, True
         done = self.seg.flush() if end else self.seg.push(feat, t_ms)
         out = {"top": self.top, "hands": int(feat[-2] + feat[-1]), "recording": len(self.seg.seg)}
         if done is not None:
-            out["final"] = top3(self.pred, self.names, done)
-            out["final_frames"] = int(len(done))
+            final, span = best_window(predictor(), STATE["labels"], done)
+            out["final"] = final
+            out["final_frames"] = int(span[1] - span[0])
+            out["final_span"] = [int(span[0]), int(span[1]), int(len(done))]
         return out
 
 
@@ -347,9 +402,64 @@ async def ws_display(websocket: WebSocket):
         DISPLAYS.discard(websocket)
 
 
+@app.post("/api/save/{sid}")
+def save_last(sid: str):
+    """Store the most recent completed sign as the user's example of word ``sid``."""
+    from app import personalise
+
+    if LAST_SIGN["x"] is None:
+        return JSONResponse({"error": "no sign recorded yet"}, status_code=400)
+    if sid not in {lab["id"] for lab in STATE["labels"]}:
+        return JSONResponse({"error": "unknown sign"}, status_code=404)
+    n = personalise.save_example(sid, LAST_SIGN["x"])
+    LAST_SIGN["x"] = None  # one sign is saved once
+    return {"id": sid, "count": n}
+
+
+@app.get("/api/user")
+def user_info():
+    from app import personalise
+
+    return {
+        "counts": personalise.counts(),
+        "status": personalise.STATUS,
+        "model": "personal" if "personal" in str(STATE["run"]) else "base",
+    }
+
+
+@app.post("/api/personalise")
+def personalise_start():
+    from app import personalise
+
+    base = Path(STATE.get("base_run") or STATE["run"])
+    STATE["base_run"] = str(base)
+
+    def swap(run: Path):
+        STATE["run"] = str(run)
+        STATE.pop("predictor", None)
+        predictor()
+
+    ok = personalise.start(base, Path("runs/personal"), swap)
+    return {"started": ok, "status": personalise.STATUS}
+
+
+@app.post("/api/model/{which}")
+def choose_model(which: str):
+    """Switch between the base model and the personalised one."""
+    base = STATE.get("base_run") or STATE["run"]
+    STATE["base_run"] = base
+    target = "runs/personal" if which == "personal" else base
+    if which == "personal" and not (Path(target) / "model.onnx").exists():
+        return JSONResponse({"error": "no personal model yet"}, status_code=404)
+    STATE["run"] = target
+    STATE.pop("predictor", None)
+    predictor()
+    return {"model": which}
+
+
 @app.get("/camera")
 def camera_page():
-    return FileResponse(STATIC / "camera.html")
+    return FileResponse(STATIC / "camera.html", headers=NO_CACHE)
 
 
 @app.get("/api/info")
