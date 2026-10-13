@@ -61,6 +61,17 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
 .item .id{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
 .item .ar{font-family:var(--ar);font-size:20px;font-weight:700;direction:rtl;text-align:right}
 .item .en{font-size:14px}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;border-radius:10px;background:var(--panel2)}
+.segbtn{font:inherit;font-weight:600;font-size:13px;padding:8px;border:0;border-radius:8px;background:transparent;color:var(--muted);cursor:pointer}
+.segbtn[aria-pressed="true"]{background:var(--teal);color:#06282B}
+.state{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--muted)}
+.state .dot{width:10px;height:10px;border-radius:50%;background:var(--muted);flex:none}
+.state.rec .dot{background:var(--red);animation:pulse 1s infinite}
+.state.rec{color:var(--ink)}
+.state.got .dot{background:var(--green)}
+.state #btnDone{margin-left:auto}
+.btn.small{padding:4px 10px;font-size:12px}
+@keyframes pulse{50%{opacity:.3}}
 .flash{animation:flash .6s ease-out}
 @keyframes flash{0%{box-shadow:0 0 0 0 rgba(61,214,140,.9)}100%{box-shadow:0 0 0 24px rgba(61,214,140,0)}}
 .muted{color:var(--muted);font-size:13px}
@@ -102,6 +113,11 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
     </div>
 
     <div class="card result" id="tabLive">
+      <div class="seg" role="radiogroup" aria-label="What to show">
+        <button class="segbtn" id="showFinal" aria-pressed="true">Final answer</button>
+        <button class="segbtn" id="showLive" aria-pressed="false">Live guesses</button>
+      </div>
+      <div class="state" id="rState"><span class="dot"></span><span id="rStateText">Ready. Sign, then lower your hands.</span><button class="btn ghost small" id="btnDone">Done</button></div>
       <div class="word" id="rWord">—</div>
       <div class="en" id="rEn">Show your hands to the camera</div>
       <div class="id" id="rId"></div>
@@ -246,7 +262,8 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
     const res=landmarker.detectForVideo(video,ts);
     const {f,lm}=featuresFromResult(res);
     drawLandmarks(lm); lastLm=lm;
-    inflight=true; ws.send(JSON.stringify({f:Array.from(f,v=>Math.round(v*10000)/10000)}));
+    const msg={f:Array.from(f,v=>Math.round(v*10000)/10000)}; if(forceEnd){ msg.end=true; forceEnd=false; }
+    inflight=true; ws.send(JSON.stringify(msg));
   }
   let lastLm={pose:[],left:[],right:[]};
   $('btnEnable').addEventListener('click',enableCamera);
@@ -270,6 +287,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   function pump(){
     if(fastMode){ fastStep(); return; }
     if(!ws||ws.readyState!==1||inflight||!video.videoWidth) return;
+    if(forceEnd){ forceEnd=false; inflight=true; ws.send(new TextEncoder().encode('END')); return; }
     const w=320, h=Math.round(320*video.videoHeight/video.videoWidth); sendCanvas.width=w; sendCanvas.height=h;
     sctx.drawImage(video,0,0,w,h);
     sendCanvas.toBlob(b=>{ if(!b||ws.readyState!==1)return; inflight=true; b.arrayBuffer().then(buf=>ws.send(buf)); },'image/jpeg',0.65);
@@ -277,11 +295,37 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   setInterval(()=>{ if(!inflight) pump(); },fastMode?16:50);  // backpressure via inflight
   (function loop(){ if(fastMode&&!inflight) pump(); requestAnimationFrame(loop); })();  // fast path: every displayed frame
 
+  // Display choice: final answer (one word after the sign ends) or live guesses
+  let showMode='final'; try{ showMode=localStorage.getItem('ssl.show')||'final'; }catch(e){}
+  function setShow(m){ showMode=m; try{localStorage.setItem('ssl.show',m);}catch(e){} $('showFinal').setAttribute('aria-pressed',m==='final'); $('showLive').setAttribute('aria-pressed',m==='live'); $('rState').hidden=m!=='final'; clearCard(); }
+  $('showFinal').addEventListener('click',()=>setShow('final')); $('showLive').addEventListener('click',()=>setShow('live'));
+  function clearCard(){ $('rWord').textContent='—'; $('rEn').textContent=showMode==='final'?'Your sign will appear here':'Show your hands to the camera'; $('rId').textContent=''; $('rBar').style.width='0'; $('rConf').textContent='confidence'; $('rStable').textContent=''; $('rAlts').innerHTML=''; }
+  let forceEnd=false;
+  $('btnDone').addEventListener('click',()=>{ forceEnd=true; });
+  setShow(showMode);
+  function setState(cls,text){ $('rState').className='state '+cls; $('rStateText').textContent=text; }
+  function showFinal(f){
+    const best=f[0];
+    $('rWord').textContent=best.ar||best.en; $('rEn').textContent=best.en; $('rId').textContent='sign '+best.id;
+    $('rBar').style.width=(best.p*100)+'%'; $('rBar').className=best.p>=THRESH?'ok':'';
+    $('rConf').textContent=`${Math.round(best.p*100)}% confidence`; $('rStable').textContent=best.p>=THRESH?'':'not sure';
+    // Alternatives only when the model is unsure
+    $('rAlts').innerHTML=best.p<THRESH?f.slice(1,3).map(a=>`<div class="alt"><span><span class="a">${a.ar}</span><span class="e">${a.en}</span></span><span class="p">${Math.round(a.p*100)}%</span></div>`).join(''):'';
+    const h=$('rHist'); const s=document.createElement('span'); s.textContent=best.ar||best.en; h.appendChild(s); if(h.children.length>12)h.removeChild(h.firstChild);
+    $('tabLive').classList.remove('flash'); void $('tabLive').offsetWidth; $('tabLive').classList.add('flash');
+  }
+
   // Results
   function onResult(r){
     fpsN++; const now=performance.now(); if(now-fpsT>1000){ $('cFps').textContent=`${(fpsN*1000/(now-fpsT)).toFixed(0)} fps · ${r.ms} ms`; fpsN=0; fpsT=now; }
     $('cHands').textContent='hands '+r.hands; $('cHands').classList.toggle('on',r.hands>0);
     if(r.lm) drawLandmarks(r.lm);
+    // Final-answer mode: state line + one word per completed sign
+    if(r.final){ setState('got',`Got it (${r.final_frames} frames). Sign the next word.`); if(showMode==='final') showFinal(r.final);
+      if(mode==='practice'&&target&&!done.has(target.id)){ const f=r.final[0]; if(f.id===target.id) markDone(); else { $('pStatus').textContent=`You signed: ${f.ar||f.en}. Try again.`; $('pStatus').className='status'; } } }
+    else if(r.recording>0) setState('rec',`Recording sign… ${r.recording} frames. Lower your hands when done.`);
+    else if(!$('rState').classList.contains('got')) setState('','Ready. Sign, then lower your hands.');
+    if(showMode==='final'){ return; }
     const top=r.top||[]; const best=top[0];
     if(best){ if(best.id===stable.id){stable.count++;} else {stable={id:best.id,count:1,fired:false};} } else { stable={id:null,count:0,fired:false}; }
     const isStable=best&&best.p>=THRESH&&stable.count>=STABLE_N;

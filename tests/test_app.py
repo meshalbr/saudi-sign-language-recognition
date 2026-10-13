@@ -41,6 +41,20 @@ def test_labels_and_one_frame():
     assert msg["hands"] == 0 and msg["top"] == [] and "ms" in msg
     assert client.get("/models/holistic_landmarker.task").status_code == 200
 
+    # Final-answer path: a real test clip, then hands down -> exactly one "final" message.
+    clips = sorted(Path("data/landmarks/0071").glob("s01_test_*.npz"))
+    if clips:
+        x = np.load(clips[0])["x"]
+        finals = []
+        with client.websocket_connect("/ws_feat") as ws:
+            for row in list(x) + [np.zeros(155, np.float32)] * 8:
+                ws.send_text(json.dumps({"f": [float(v) for v in row]}))
+                m = json.loads(ws.receive_text())
+                if "final" in m:
+                    finals.append(m["final"])
+        assert len(finals) == 1
+        assert finals[0][0]["id"] == "0071"
+
     if Path("data/landmarks/0071").is_dir():
         ref = client.get("/api/ref/0071").json()
         assert ref["frames"] and len(ref["frames"][0]["pose"]) == 9

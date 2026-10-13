@@ -166,81 +166,110 @@ def model_file():
     return FileResponse(DEFAULT_MODEL, media_type="application/octet-stream")
 
 
+class Segmenter:
+    """Cuts the stream into single signs: a sign starts when hands appear and ends when they
+    drop out of view for a few frames (or the client sends {"end": true})."""
+
+    def __init__(self, min_len: int = 10, gap: int = 6, max_len: int = 150):
+        self.min_len, self.gap, self.max_len = min_len, gap, max_len
+        self.seg: list[np.ndarray] = []
+        self.missing = 0
+
+    def push(self, feat: np.ndarray) -> np.ndarray | None:
+        hands = feat[-2] + feat[-1] > 0
+        if hands:
+            self.seg.append(feat)
+            self.missing = 0
+            if len(self.seg) >= self.max_len:
+                return self.flush()
+        elif self.seg:
+            self.missing += 1
+            if self.missing >= self.gap:
+                return self.flush()
+        return None
+
+    def flush(self) -> np.ndarray | None:
+        seg, self.seg, self.missing = self.seg, [], 0
+        return np.stack(seg) if len(seg) >= self.min_len else None
+
+
+def top3(pred, names, x) -> list[dict]:
+    p = pred.predict(x)
+    return [{**names[i], "p": round(float(p[i]), 3)} for i in np.argsort(-p)[:3]]
+
+
+class Session:
+    """Per-connection state: rolling window for live guesses + segmenter for final answers."""
+
+    def __init__(self):
+        self.pred = predictor()
+        self.names = STATE["labels"]
+        self.buf: collections.deque = collections.deque(maxlen=STATE["window"])
+        self.seg = Segmenter()
+        self.frame_i = 0
+        self.top: list[dict] = []
+
+    def step(self, feat: np.ndarray, end: bool = False) -> dict:
+        self.buf.append(feat)
+        self.frame_i += 1
+        if self.frame_i % STATE["stride"] == 0 and len(self.buf) >= STATE["window"] // 2:
+            x = np.stack(self.buf)
+            ok = (x[:, -2] + x[:, -1] > 0).mean() > 0.5
+            self.top = top3(self.pred, self.names, x) if ok else []
+        done = self.seg.flush() if end else self.seg.push(feat)
+        out = {
+            "top": self.top,
+            "hands": int(feat[-2] + feat[-1]),
+            "recording": len(self.seg.seg),
+        }
+        if done is not None:
+            out["final"] = top3(self.pred, self.names, done)
+            out["final_frames"] = int(len(done))
+        return out
+
+
 @app.websocket("/ws_feat")
 async def ws_feat(websocket: WebSocket):
     """Fast path: the browser runs MediaPipe and sends 155-d feature rows; we only classify."""
     await websocket.accept()
-    pred = predictor()
-    names = STATE["labels"]
-    buf: collections.deque = collections.deque(maxlen=STATE["window"])
-    frame_i = 0
-    top: list[dict] = []
+    sess = Session()
     try:
         while True:
             msg = json.loads(await websocket.receive_text())
             t = time.perf_counter()
-            feat = np.asarray(msg["f"], dtype=np.float32)
+            feat = np.asarray(msg.get("f", []), dtype=np.float32)
             if feat.shape != (155,):
-                continue
-            buf.append(feat)
-            frame_i += 1
-            hands = int(feat[-2] + feat[-1])
-            if frame_i % STATE["stride"] == 0 and len(buf) >= STATE["window"] // 2:
-                x = np.stack(buf)
-                if (x[:, -2] + x[:, -1] > 0).mean() > 0.5:
-                    p = pred.predict(x)
-                    order = np.argsort(-p)[:3]
-                    top = [{**names[i], "p": round(float(p[i]), 3)} for i in order]
-                else:
-                    top = []
-            await websocket.send_text(
-                json.dumps(
-                    {"top": top, "hands": hands, "ms": round((time.perf_counter() - t) * 1000, 1)}
-                )
-            )
+                feat = np.zeros(155, np.float32)
+            out = sess.step(feat, end=bool(msg.get("end")))
+            out["ms"] = round((time.perf_counter() - t) * 1000, 1)
+            await websocket.send_text(json.dumps(out))
     except WebSocketDisconnect:
         pass
 
 
 @app.websocket("/ws")
 async def ws(websocket: WebSocket):
+    """Server path: the browser sends JPEG frames; MediaPipe runs here."""
     await websocket.accept()
-    pred = predictor()
-    names = STATE["labels"]
-    buf: collections.deque = collections.deque(maxlen=STATE["window"])
-    frame_i = 0
-    top: list[dict] = []
+    sess = Session()
     t0 = time.time()
     with HolisticExtractor() as ex:
         try:
             while True:
                 data = await websocket.receive_bytes()
                 t = time.perf_counter()
-                frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
-                if frame is None:
-                    continue
-                feat = ex.process(frame, int((time.time() - t0) * 1000))
-                buf.append(feat)
-                frame_i += 1
-                hands = int(feat[-2] + feat[-1])
-                if frame_i % STATE["stride"] == 0 and len(buf) >= STATE["window"] // 2:
-                    x = np.stack(buf)
-                    if (x[:, -2] + x[:, -1] > 0).mean() > 0.5:
-                        p = pred.predict(x)
-                        order = np.argsort(-p)[:3]
-                        top = [{**names[i], "p": round(float(p[i]), 3)} for i in order]
-                    else:
-                        top = []
-                await websocket.send_text(
-                    json.dumps(
-                        {
-                            "top": top,
-                            "hands": hands,
-                            "lm": landmarks_payload(ex.last_result),
-                            "ms": round((time.perf_counter() - t) * 1000, 1),
-                        }
-                    )
-                )
+                if data == b"END":
+                    out = sess.step(np.zeros(155, np.float32), end=True)
+                    out["lm"] = {"pose": [], "left": [], "right": []}
+                else:
+                    frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+                    if frame is None:
+                        continue
+                    feat = ex.process(frame, int((time.time() - t0) * 1000))
+                    out = sess.step(feat)
+                    out["lm"] = landmarks_payload(ex.last_result)
+                out["ms"] = round((time.perf_counter() - t) * 1000, 1)
+                await websocket.send_text(json.dumps(out))
         except WebSocketDisconnect:
             pass
 
