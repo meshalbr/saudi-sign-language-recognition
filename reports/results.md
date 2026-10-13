@@ -28,7 +28,23 @@ Full recipe on all folds (leave-one-signer-out):
 | 2026-10-13 | s01 | 0.687 | **0.751** | 0.932 |
 | 2026-10-13 | mean | 0.670 | **0.763** | 0.936 |
 
-Stronger regularisation (hand_drop 0.3, weight_decay 1e-3) on s02: **0.759 / 0.946** (+1.5 over the full recipe). Next batch runs it on all folds together with a Transformer comparison.
+Stronger regularisation ("strong": hand_drop 0.3, weight_decay 1e-3, checkpoint tie-break by validation loss):
+
+| Date | Fold | Full recipe top-1 | Strong top-1 | Strong top-5 |
+|---|---|---|---|---|
+| 2026-10-13 | s03 | 0.794 | **0.804** | 0.944 |
+| 2026-10-13 | s02 | 0.744 | **0.759** | 0.946 |
+| 2026-10-13 | s01 | 0.751 | **0.770** | 0.947 |
+| 2026-10-13 | mean | 0.763 | **0.778** | **0.946** |
+
+## Model comparison: GRU vs Transformer (same features, same "strong" regularisation)
+
+| Date | Fold | Model | Params | Train time | Top-1 | Top-5 | Test loss |
+|---|---|---|---|---|---|---|---|
+| 2026-10-13 | s02 | BiGRU 2x128 | 586k | 28 min | 0.759 | 0.946 | 1.04 |
+| 2026-10-13 | s02 | Transformer 2 layers, dim 128, 4 heads, CLS token | 450k | 24 min | **0.824** | **0.961** | 0.67 |
+
+The Transformer beats the GRU by 6.5 points on the hardest fold with fewer parameters and lower test loss, which means better-calibrated confidence as well as more correct answers. It is being run on the other two folds to confirm.
 
 Reading: removing each signer's hand size and proportions (hand-local) is the single biggest win. Velocity alone is noise, but it does not hurt when combined. Regularisation (dropout 0.5 and simulated missing hands) adds another 4 to 5 points, which fits the diagnosis of signer memorisation. Known weakness of the protocol: validation top-1 saturates at 1.000 by epoch 15 in every run, so "best checkpoint by validation" is effectively arbitrary; selection by validation loss or a fixed final epoch is the next protocol fix.
 
