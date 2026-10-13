@@ -10,7 +10,18 @@
 | 2026-10-13 | karsl100_loso_s01 (40 ep) | train s02+s03 (8610 / 1501 val), test all 5006 clips of s01 | 0.687 | 0.867 | signer-independent |
 | 2026-10-13 | leave-one-signer-out mean | 3 folds, 15,117 test clips in total | **0.670** | 0.884 | the number to improve |
 
-Reading: with the signer seen in training the model is near perfect; with a new signer it drops to two thirds top-1 while top-5 stays near 0.9. Validation (same signers as train) reaches 1.000 in every fold, so the model memorises signer style. Next experiments target that gap: stronger spatial augmentation, hand-scale normalisation, velocity features, dropout on whole hand blocks, and a Transformer comparison.
+## Phase 2: closing the signer gap (fold: test signer 02, baseline 0.641 / 0.893)
+
+| Date | Config | Change vs baseline | Top-1 | Top-5 | Delta top-1 |
+|---|---|---|---|---|---|
+| 2026-10-13 | p2_s02_handlocal | hand points wrist-relative, scaled by hand size | 0.701 | 0.912 | +6.0 |
+| 2026-10-13 | p2_s02_vel | + velocity (frame differences) only | 0.655 | 0.883 | +1.4 |
+| 2026-10-13 | p2_s02_handlocal_vel | hand-local + velocity | 0.697 | 0.904 | +5.6 |
+| 2026-10-13 | p2_s02_full | hand-local + velocity + hand-block dropout 0.15 + dropout 0.5 | **0.744** | **0.932** | **+10.3** |
+
+Reading: removing each signer's hand size and proportions (hand-local) is the single biggest win. Velocity alone is noise, but it does not hurt when combined. Regularisation (dropout 0.5 and simulated missing hands) adds another 4 to 5 points, which fits the diagnosis of signer memorisation. Known weakness of the protocol: validation top-1 saturates at 1.000 by epoch 15 in every run, so "best checkpoint by validation" is effectively arbitrary; selection by validation loss or a fixed final epoch is the next protocol fix.
+
+Reading of phase 1: with the signer seen in training the model is near perfect; with a new signer it drops to two thirds top-1 while top-5 stays near 0.9. Validation (same signers as train) reaches 1.000 in every fold, so the model memorises signer style. Next experiments target that gap: stronger spatial augmentation, hand-scale normalisation, velocity features, dropout on whole hand blocks, and a Transformer comparison.
 
 ## Latency (laptop: Ryzen 5 3500U, 4 cores, 7 GB RAM, no CUDA)
 
