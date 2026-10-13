@@ -1,0 +1,14 @@
+# KArSL-100, signer 01 only, official train/test split (signer-dependent baseline)
+data_dir: data/landmarks
+official_split: false
+seq_len: 32
+batch_size: 64
+epochs: 40
+lr: 0.002
+weight_decay: 0.0001
+hidden: 128
+layers: 2
+dropout: 0.3
+augment: true
+seed: 42
+out_dir: runs/karsl100_loso_s01
