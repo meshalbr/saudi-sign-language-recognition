@@ -31,7 +31,7 @@ STATIC = ROOT / "static"
 CERTS = ROOT / "certs"
 
 app = FastAPI(title="Saudi Sign Language")
-STATE: dict = {"run": None, "names": None, "window": 40, "stride": 4}
+STATE: dict = {"run": None, "names": None, "window": 40, "stride": 1}
 
 
 def load_names(path: Path | None, labels: list[str]) -> list[dict]:
@@ -62,6 +62,47 @@ def index():
 def labels():
     predictor()
     return JSONResponse(STATE["labels"])
+
+
+def _reference_file(sid: str, suffix: str, folder: str) -> Path | None:
+    """First reference clip for a sign: prefer signer 01 test clips, then anything."""
+    d = Path(folder) / sid
+    if not d.is_dir():
+        return None
+    files = sorted(d.glob(f"s01_test_*{suffix}")) or sorted(d.glob(f"*{suffix}"))
+    return files[0] if files else None
+
+
+@app.get("/api/ref/{sid}")
+def reference(sid: str):
+    """Landmark sequence of one reference clip, for the skeleton animation in the UI."""
+    f = _reference_file(sid, ".npz", "data/landmarks")
+    if f is None:
+        return JSONResponse({"error": "no reference clip"}, status_code=404)
+    with np.load(f) as z:
+        x = z["x"]
+    frames = []
+    for row in x:
+        pose = row[:27].reshape(9, 3)[:, :2]
+        left = row[27:90].reshape(21, 3)[:, :2]
+        right = row[90:153].reshape(21, 3)[:, :2]
+        frames.append(
+            {
+                "pose": np.round(pose, 3).tolist(),
+                "left": np.round(left, 3).tolist() if row[153] > 0 else [],
+                "right": np.round(right, 3).tolist() if row[154] > 0 else [],
+            }
+        )
+    return JSONResponse({"id": sid, "fps": 30, "frames": frames})
+
+
+@app.get("/api/clip/{sid}")
+def clip(sid: str):
+    """Reference video (H.264 mp4) of one sign, when the KArSL videos are present locally."""
+    f = _reference_file(sid, ".mp4", "data/videos")
+    if f is None:
+        return JSONResponse({"error": "no video"}, status_code=404)
+    return FileResponse(f, media_type="video/mp4")
 
 
 def landmarks_payload(result) -> dict:
@@ -186,7 +227,7 @@ def main() -> None:
         "--https", action="store_true", help="self-signed TLS so phones allow the camera"
     )
     ap.add_argument("--window", type=int, default=40)
-    ap.add_argument("--stride", type=int, default=4)
+    ap.add_argument("--stride", type=int, default=1, help="predict every N frames (1 = every)")
     args = ap.parse_args()
     STATE.update(run=args.run, names=args.names, window=args.window, stride=args.stride)
     predictor()  # load once, fail early

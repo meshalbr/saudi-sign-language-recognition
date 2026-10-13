@@ -34,3 +34,11 @@ def test_labels_and_one_frame():
         msg = json.loads(ws.receive_text())
     assert {"top", "hands", "lm", "ms"} <= set(msg)
     assert msg["hands"] == 0 and msg["top"] == []
+
+    if Path("data/landmarks/0071").is_dir():
+        ref = client.get("/api/ref/0071").json()
+        assert ref["frames"] and len(ref["frames"][0]["pose"]) == 9
+    if Path("data/videos/0071").is_dir():
+        r = client.get("/api/clip/0071")
+        assert r.status_code == 200 and r.headers["content-type"].startswith("video/mp4")
+    assert client.get("/api/ref/9999").status_code == 404

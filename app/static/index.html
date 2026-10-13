@@ -64,6 +64,10 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
 .flash{animation:flash .6s ease-out}
 @keyframes flash{0%{box-shadow:0 0 0 0 rgba(61,214,140,.9)}100%{box-shadow:0 0 0 24px rgba(61,214,140,0)}}
 .muted{color:var(--muted);font-size:13px}
+.ref{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ref .refvid,.ref .refcv{width:100%;aspect-ratio:1;border-radius:10px;background:#000;object-fit:cover}
+.ref .refcv{background:var(--panel2)}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap}
 [hidden]{display:none!important}
 </style>
 </head>
@@ -111,6 +115,8 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
       <div class="target" id="pAr">—</div>
       <div class="en" id="pEn"></div>
       <div class="id" id="pId"></div>
+      <div class="ref" id="pRef"><video class="refvid" id="pVid" muted loop playsinline></video><canvas class="refcv" id="pCv" width="240" height="240"></canvas></div>
+      <div class="muted">Left: reference recording. Right: the hand movement the model sees.</div>
       <div class="status" id="pStatus">Waiting…</div>
       <div class="bar"><i id="pBar"></i></div>
       <div class="row">
@@ -121,8 +127,10 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
 
     <div class="card" id="tabWords" hidden>
       <input class="search" id="search" placeholder="Search Arabic, English or ID…" autocomplete="off">
+      <div class="ref" id="wRef" hidden><video class="refvid" id="wVid" muted loop playsinline></video><canvas class="refcv" id="wCv" width="240" height="240"></canvas></div>
+      <div class="row" id="wRow" hidden><span class="muted" id="wName"></span><button class="btn" id="btnPractiseThis">Practise this</button></div>
       <div class="list" id="list"></div>
-      <div class="muted">Tap a word to practise it.</div>
+      <div class="muted">Tap a word to see how it is signed.</div>
     </div>
   </aside>
 </main>
@@ -133,8 +141,9 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   const video=$('video'), overlay=$('overlay'), ctx=overlay.getContext('2d'), stage=$('stage');
   const sendCanvas=document.createElement('canvas'); const sctx=sendCanvas.getContext('2d');
   let ws=null, stream=null, facing='user', inflight=false, labels=[], fpsN=0, fpsT=performance.now();
-  let stable={id:null,count:0,fired:false}; const STABLE_N=4, THRESH=0.6;
+  let stable={id:null,count:0,fired:false}; const STABLE_N=3, THRESH=0.6;
   let mode='live', target=null, done=new Set(), order=[], ptr=0;
+  const HAND_EDGES=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 
   // Tabs
   document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
@@ -151,10 +160,35 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
       .map(l=>`<div class="item ${target&&target.id===l.id?'cur':''} ${done.has(l.id)?'done':''}" data-id="${l.id}"><span class="id">${l.id}</span><span class="en">${l.en}</span><span class="ar">${l.ar}</span></div>`).join('');
   }
   $('search').addEventListener('input',e=>renderList(e.target.value));
-  $('list').addEventListener('click',e=>{const it=e.target.closest('.item'); if(!it)return; setTarget(labels.find(l=>l.id===it.dataset.id)); document.querySelector('[data-tab="practice"]').click();});
+  let wordSel=null;
+  $('list').addEventListener('click',e=>{const it=e.target.closest('.item'); if(!it)return; wordSel=labels.find(l=>l.id===it.dataset.id); $('wRef').hidden=false; $('wRow').hidden=false; $('wName').textContent=`${wordSel.ar} · ${wordSel.en} · ${wordSel.id}`; showReference(wordSel.id,$('wVid'),$('wCv')); document.querySelectorAll('.item').forEach(x=>x.classList.toggle('cur',x.dataset.id===wordSel.id));});
+  $('btnPractiseThis').addEventListener('click',()=>{ if(wordSel){ setTarget(wordSel); document.querySelector('[data-tab="practice"]').click(); } });
+
+  // Reference clip: real video + animated skeleton of the landmarks the model sees
+  const anims={};
+  function showReference(id,vid,cv){
+    vid.src=`/api/clip/${id}`; vid.play().catch(()=>{});
+    if(anims[cv.id]) cancelAnimationFrame(anims[cv.id]);
+    fetch(`/api/ref/${id}`).then(r=>r.ok?r.json():null).then(ref=>{ if(!ref)return; animateSkeleton(cv,ref); }).catch(()=>{});
+  }
+  const POSE9_EDGES=[[1,2],[1,3],[3,5],[2,4],[4,6],[1,7],[2,8],[7,8]]; // nose,shL,shR,elL,elR,wrL,wrR,hipL,hipR
+  function animateSkeleton(cv,ref){
+    const c=cv.getContext('2d'), W=cv.width, H=cv.height, n=ref.frames.length; let t0=performance.now();
+    // body frame: (0,0) = shoulder midpoint, 1 = shoulder width. Map to canvas: centre at (0.5,0.38), 1 unit = 0.28 W.
+    const M=p=>[W*0.5+p[0]*W*0.28, H*0.38+p[1]*W*0.28];
+    function draw(pts,edges,col,r){ if(!pts.length)return; c.strokeStyle=col; c.fillStyle=col; c.lineWidth=2.5; c.lineCap='round'; edges.forEach(([a,b])=>{ if(!pts[a]||!pts[b])return; const A=M(pts[a]),B=M(pts[b]); c.beginPath(); c.moveTo(A[0],A[1]); c.lineTo(B[0],B[1]); c.stroke(); }); pts.forEach(p=>{const q=M(p); c.beginPath(); c.arc(q[0],q[1],r,0,Math.PI*2); c.fill();}); }
+    function frame(now){
+      const i=Math.floor(((now-t0)/1000*ref.fps)%n); const f=ref.frames[i];
+      c.clearRect(0,0,W,H); c.fillStyle='#1F2832'; c.fillRect(0,0,W,H);
+      draw(f.pose,POSE9_EDGES,'rgba(47,191,201,.9)',3); draw(f.left,HAND_EDGES,'rgba(61,214,140,.95)',2.5); draw(f.right,HAND_EDGES,'rgba(242,184,59,.95)',2.5);
+      c.fillStyle='#8B9AAB'; c.font='12px Sora,sans-serif'; c.fillText(`frame ${i+1}/${n}`,8,H-8);
+      anims[cv.id]=requestAnimationFrame(frame);
+    }
+    anims[cv.id]=requestAnimationFrame(frame);
+  }
 
   // Practice
-  function setTarget(l){target=l; $('pAr').textContent=l.ar||'—'; $('pEn').textContent=l.en; $('pId').textContent='sign '+l.id; $('pStatus').textContent='Waiting…'; $('pStatus').className='status'; $('pBar').style.width='0'; renderList($('search').value);}
+  function setTarget(l){target=l; $('pAr').textContent=l.ar||'—'; $('pEn').textContent=l.en; $('pId').textContent='sign '+l.id; $('pStatus').textContent='Waiting…'; $('pStatus').className='status'; $('pBar').style.width='0'; showReference(l.id,$('pVid'),$('pCv')); renderList($('search').value);}
   function nextTarget(){ if(!labels.length)return; for(let k=0;k<labels.length;k++){ptr=(ptr+1)%labels.length; if(!done.has(labels[ptr].id))break;} setTarget(labels[ptr]); }
   $('btnNext').addEventListener('click',nextTarget); $('btnSkip').addEventListener('click',nextTarget);
   function markDone(){ done.add(target.id); $('pProg').textContent=`${done.size} / ${labels.length} done`; $('pStatus').textContent='Correct ✓'; $('pStatus').className='status ok'; $('tabPractice').classList.remove('flash'); void $('tabPractice').offsetWidth; $('tabPractice').classList.add('flash'); setTimeout(nextTarget,1200); }
@@ -185,9 +219,9 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
     if(!ws||ws.readyState!==1||inflight||!video.videoWidth) return;
     const w=320, h=Math.round(320*video.videoHeight/video.videoWidth); sendCanvas.width=w; sendCanvas.height=h;
     sctx.drawImage(video,0,0,w,h);
-    sendCanvas.toBlob(b=>{ if(!b||ws.readyState!==1)return; inflight=true; b.arrayBuffer().then(buf=>ws.send(buf)); },'image/jpeg',0.7);
+    sendCanvas.toBlob(b=>{ if(!b||ws.readyState!==1)return; inflight=true; b.arrayBuffer().then(buf=>ws.send(buf)); },'image/jpeg',0.65);
   }
-  setInterval(()=>{ if(!inflight) pump(); },80);  // ~12 fps cap; backpressure via inflight
+  setInterval(()=>{ if(!inflight) pump(); },50);  // up to 20 fps; backpressure via inflight
 
   // Results
   function onResult(r){
@@ -212,7 +246,6 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
 
   // Skeleton overlay
   const POSE_EDGES=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24]];
-  const HAND_EDGES=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
   function drawLandmarks(lm){
     const W=overlay.width=overlay.clientWidth, H=overlay.height=overlay.clientHeight; ctx.clearRect(0,0,W,H);
     // video is object-fit:cover; map normalised coords through the same crop
