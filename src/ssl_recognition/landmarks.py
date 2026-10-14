@@ -38,6 +38,17 @@ RIGHT_FLAG = FEATURE_DIM - 1
 TRAIN_ASPECT = 1920 / 1080
 
 DEFAULT_MODEL = Path(__file__).resolve().parents[2] / "models" / "holistic_landmarker.task"
+HAND_MODEL = Path(__file__).resolve().parents[2] / "models" / "hand_landmarker.task"
+HAND_MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
+    "hand_landmarker/float16/latest/hand_landmarker.task"
+)
+# Hand recovery: Holistic loses a hand lying flat on the chest or near the face (e.g. "trachea").
+# When that happens and the pose still has the wrist, the standalone hand model is run on a crop
+# around the wrist. Pose indices: left wrist 15, pinky 17, index 19; right 16, 18, 20.
+RECOVER_SIDES = (("left", (15, 17, 19)), ("right", (16, 18, 20)))
+RECOVER_MAX_WRIST_Y = 0.85  # only hands raised above this image height (resting hands are lower)
+RECOVER_CROP = 0.55  # crop half-size in shoulder widths
 MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/holistic_landmarker/"
     "holistic_landmarker/float16/latest/holistic_landmarker.task"
@@ -135,7 +146,9 @@ class HolisticExtractor:
             feat = ex.process(bgr_frame, timestamp_ms)
     """
 
-    def __init__(self, model_path: str | Path = DEFAULT_MODEL, min_conf: float = 0.5):
+    def __init__(
+        self, model_path: str | Path = DEFAULT_MODEL, min_conf: float = 0.5, recover: bool = True
+    ):
         import mediapipe as mp
         from mediapipe.tasks.python import BaseOptions, vision
 
@@ -155,6 +168,18 @@ class HolisticExtractor:
         self._landmarker = vision.HolisticLandmarker.create_from_options(options)
         self._last_ts = -1
         self.last_result = None
+        self.recovered = {"left": None, "right": None}  # (21,3) arrays recovered this frame
+        self._hand = None
+        if recover and Path(HAND_MODEL).exists():
+            self._hand = vision.HandLandmarker.create_from_options(
+                vision.HandLandmarkerOptions(
+                    base_options=BaseOptions(model_asset_path=str(HAND_MODEL)),
+                    running_mode=vision.RunningMode.IMAGE,
+                    num_hands=2,
+                    min_hand_detection_confidence=0.3,
+                    min_hand_presence_confidence=0.3,
+                )
+            )
 
     def process(self, bgr: np.ndarray, timestamp_ms: int) -> np.ndarray:
         """Run the landmarker on a BGR frame and return the 155-d feature vector."""
@@ -168,16 +193,66 @@ class HolisticExtractor:
         image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
         self.last_result = self._landmarker.detect_for_video(image, timestamp_ms)
         h, w = bgr.shape[:2]
-        return features_from_result(self.last_result, aspect=w / h)
+        pose = _to_array(self.last_result.pose_landmarks, 33)
+        left = _to_array(self.last_result.left_hand_landmarks, N_HAND)
+        right = _to_array(self.last_result.right_hand_landmarks, N_HAND)
+        self.recovered = {"left": None, "right": None}
+        if self._hand is not None and pose is not None and (left is None or right is None):
+            rec = recover_hands(self._hand, self._mp, rgb, pose, left is None, right is None)
+            self.recovered = rec
+            left = left if left is not None else rec["left"]
+            right = right if right is not None else rec["right"]
+        return features_from_arrays(pose, left, right, aspect=w / h)
 
     def close(self) -> None:
         self._landmarker.close()
+        if self._hand is not None:
+            self._hand.close()
 
     def __enter__(self):
         return self
 
     def __exit__(self, *exc):
         self.close()
+
+
+def recover_hands(hand_model, mp, rgb, pose, need_left: bool, need_right: bool) -> dict:
+    """Find missing hands with the standalone hand model on a crop around each raised wrist.
+
+    Returns {"left": (21,3) or None, "right": (21,3) or None} in full-image normalised
+    coordinates. A detected hand is accepted only if its wrist lies close to that side's pose
+    wrist, so the other hand is never copied into the missing side.
+    """
+    h, w = rgb.shape[:2]
+    out = {"left": None, "right": None}
+    sw = float(np.linalg.norm((pose[11, :2] - pose[12, :2]) * [w, h]))
+    if sw < 5:
+        return out
+    for side, (wr, pk, ix) in RECOVER_SIDES:
+        if not ((side == "left" and need_left) or (side == "right" and need_right)):
+            continue
+        if pose[wr, 1] > RECOVER_MAX_WRIST_Y:
+            continue
+        cx = float(pose[[wr, pk, ix], 0].mean() * w)
+        cy = float(pose[[wr, pk, ix], 1].mean() * h)
+        half = max(16, int(sw * RECOVER_CROP))
+        x0, y0 = max(0, int(cx - half)), max(0, int(cy - half))
+        x1, y1 = min(w, int(cx + half)), min(h, int(cy + half))
+        if x1 - x0 < 16 or y1 - y0 < 16:
+            continue
+        crop = np.ascontiguousarray(rgb[y0:y1, x0:x1])
+        res = hand_model.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=crop))
+        best, best_d = None, None
+        for lms in res.hand_landmarks or []:
+            a = np.array([[lm.x, lm.y, lm.z] for lm in lms], dtype=np.float32)
+            a[:, 0] = (x0 + a[:, 0] * (x1 - x0)) / w
+            a[:, 1] = (y0 + a[:, 1] * (y1 - y0)) / h
+            a[:, 2] = a[:, 2] * (x1 - x0) / w  # z is in crop-width units
+            d = float(np.linalg.norm((a[0, :2] - pose[wr, :2]) * [w, h])) / sw
+            if d < 0.6 and (best_d is None or d < best_d):
+                best, best_d = a, d
+        out[side] = best
+    return out
 
 
 def draw_result(bgr: np.ndarray, result) -> np.ndarray:
