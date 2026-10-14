@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saudi Sign Language Project Log</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,700&family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: engineering logbook. Sticky contents rail on the left, one reading column, dense tables. */
+:root{
+  --paper:#F7F6F2; --ink:#1D232B; --muted:#5D6670; --line:#D9D6CE; --panel:#FFFFFF;
+  --accent:#1F5F7A; --accent-soft:#E2EEF2; --good:#2E7D4F; --warn:#9A6B12; --bad:#A33A3A; --warn-soft:#F6EEDB;
+  --serif:"Source Serif 4",Georgia,serif; --sans:"Source Sans 3",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){ :root{
+  --paper:#13171C; --ink:#E6E9EC; --muted:#9AA4AE; --line:#2B333C; --panel:#1A2027;
+  --accent:#6FB6D3; --accent-soft:#16303A; --good:#6CC793; --warn:#E0B45A; --bad:#E58585; --warn-soft:#33291A; } }
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.55}
+.wrap{max-width:1180px;margin:0 auto;padding:28px 16px 64px;display:grid;grid-template-columns:230px minmax(0,1fr);gap:40px}
+@media (max-width:900px){.wrap{grid-template-columns:minmax(0,1fr)}nav{display:none}}
+nav{position:sticky;top:16px;align-self:start;display:flex;flex-direction:column;gap:2px;font-size:14px}
+nav a{color:var(--muted);text-decoration:none;padding:5px 10px;border-left:2px solid var(--line)}
+nav a:hover{color:var(--ink);border-left-color:var(--accent)}
+main{min-width:0;display:flex;flex-direction:column;gap:44px}
+h1,h2,h3{font-family:var(--serif);line-height:1.2;margin:0;text-wrap:balance}
+h1{font-size:clamp(30px,4vw,42px)} h2{font-size:26px;border-bottom:1px solid var(--line);padding-bottom:8px} h3{font-size:19px;margin-top:18px}
+p{margin:8px 0;max-width:75ch}
+section{display:flex;flex-direction:column;gap:10px;scroll-margin-top:12px}
+.meta{color:var(--muted);font-size:14px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:10px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.kpi b{display:block;font-family:var(--mono);font-size:24px;font-variant-numeric:tabular-nums}
+.kpi span{font-size:13px;color:var(--muted)}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:14.5px;background:var(--panel)}
+th,td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{font-size:13px;color:var(--muted);font-weight:700;background:var(--accent-soft)}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+code,.mono{font-family:var(--mono);font-size:.9em}
+pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;overflow-x:auto;font-family:var(--mono);font-size:13.5px;line-height:1.45;margin:6px 0}
+.issue{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:6px;padding:12px 16px}
+.issue h3{margin:0 0 4px;font-size:17px}
+.issue dl{display:grid;grid-template-columns:110px minmax(0,1fr);gap:4px 12px;margin:6px 0 0}
+.issue dt{font-weight:700;color:var(--muted);font-size:14px}
+.issue dd{margin:0}
+.tag{display:inline-block;font-size:12px;font-weight:700;padding:1px 8px;border-radius:999px;margin-left:6px;vertical-align:middle}
+.tag.done{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}
+.tag.run{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn)}
+.note{background:var(--warn-soft);border-left:4px solid var(--warn);padding:10px 14px;border-radius:0 6px 6px 0;max-width:80ch}
+.up{color:var(--good);font-weight:700} .down{color:var(--bad);font-weight:700}
+footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav aria-label="Contents">
+  <a href="#overview">Overview</a>
+  <a href="#status">Current status</a>
+  <a href="#hardware">Hardware</a>
+  <a href="#data">Dataset</a>
+  <a href="#pipeline">How it works</a>
+  <a href="#code">Code structure</a>
+  <a href="#libs">Libraries</a>
+  <a href="#training">Training and time</a>
+  <a href="#results">Results</a>
+  <a href="#app">The app</a>
+  <a href="#problems">Problems and fixes</a>
+  <a href="#next">Next steps</a>
+</nav>
+
+<main>
+<header id="overview">
+  <p class="meta">Portfolio project 1 · Meshal AlRubaie · github.com/meshalbr/saudi-sign-language-recognition · log started 12 Oct 2026, last updated 14 Oct 2026, 23:40</p>
+  <h1>Saudi Sign Language Recognition: Project Log</h1>
+  <p>A system that recognises Saudi / Arabic sign language words from an ordinary camera, laptop or phone, in real time, on a laptop with no graphics card. MediaPipe turns each video frame into body and hand landmark points, and a small Transformer reads the movement of those points over time and names the sign in Arabic and English. This page records what was built, every problem met, how each was fixed, and the measured evidence.</p>
+  <div class="kpis">
+    <div class="kpi"><b>100</b><span>signs (KArSL-100)</span></div>
+    <div class="kpi"><b>15,117</b><span>training videos, 3 signers</span></div>
+    <div class="kpi"><b>83.7%</b><span>top-1 on a signer never seen (published best: 68.2%)</span></div>
+    <div class="kpi"><b>99.7%</b><span>top-1 on the official test split</span></div>
+    <div class="kpi"><b>~25 min</b><span>training time per model, laptop CPU</span></div>
+  </div>
+</header>
+
+<section id="status">
+  <h2>Current status</h2>
+  <div class="note"><b>Running now (overnight 14–15 Oct):</b> all 15,117 videos are being re-extracted with the new hand-recovery step and face points (about 9–10 hours, 3 worker processes). When that finishes, two model versions train automatically on the three signer-held-out tests plus a final app model each: <i>recovery only</i> and <i>recovery + movement focus</i>. The better one replaces the app model. Results will be added to this page.</div>
+  <div class="scroll"><table>
+    <tr><th>Part</th><th>State</th></tr>
+    <tr><td>Recognition pipeline, training, evaluation</td><td>Done <span class="tag done">done</span></td></tr>
+    <tr><td>Browser app (laptop + phone camera, practice, word list, teach mode)</td><td>Done <span class="tag done">done</span></td></tr>
+    <tr><td>Fix for signs where the hand lies on the chest (trachea, respiratory device)</td><td>Code done; re-extraction and retraining running <span class="tag run">running</span></td></tr>
+    <tr><td>Movement-focused model (trimming, smoothing, trajectory features)</td><td>Code done; comparison training queued <span class="tag run">queued</span></td></tr>
+    <tr><td>Automated tests</td><td>30 passing; GitHub checks green</td></tr>
+  </table></div>
+</section>
+
+<section id="hardware">
+  <h2>Hardware</h2>
+  <p>Everything, including training, runs on one deliberately modest laptop. No cloud GPU was used.</p>
+  <div class="scroll"><table>
+    <tr><th>Part</th><th>Spec</th><th>Consequence</th></tr>
+    <tr><td>CPU</td><td>AMD Ryzen 5 3500U, 4 cores / 8 threads</td><td>All training and landmark extraction run here</td></tr>
+    <tr><td>RAM</td><td>7 GB</td><td>Data is stored as small landmark files and streamed, never loaded as video</td></tr>
+    <tr><td>GPU</td><td>Radeon Vega 8 integrated, 1 GB, no CUDA</td><td>PyTorch runs on CPU; the browser uses this GPU for MediaPipe through WebGL</td></tr>
+    <tr><td>Disk</td><td>D: drive, about 195 GB free at the start</td><td>Raw videos 19 GB; landmark files a few hundred MB</td></tr>
+  </table></div>
+</section>
+
+<section id="data">
+  <h2>Dataset</h2>
+  <p><b>KArSL</b> (King Fahd University of Petroleum and Minerals): 502 Arabic sign words, each performed 50 times by 3 professional signers, recorded with a Kinect V2. This project uses <b>KArSL-100</b>, the 100 dynamic signs 0071–0170 (health, verbs, family, places and more). The raw videos are public Google Drive folders on the dataset page; the provided skeleton files were not downloadable, so landmarks were extracted locally.</p>
+  <div class="scroll"><table>
+    <tr><th>Item</th><th>Value</th></tr>
+    <tr><td>Videos used</td><td class="n">15,117 (signer 01: 5,006 · 02: 5,066 · 03: 5,045)</td></tr>
+    <tr><td>Video format</td><td>1920 × 1080, 30 fps, H.264, about 48 frames per clip (min 15, max 116)</td></tr>
+    <tr><td>Download size</td><td class="n">about 19 GB of 7z archives (5.5 GB + 1.0 GB per signer)</td></tr>
+    <tr><td>Official split</td><td>per signer: about 84% train / 16% test (e.g. signer 01: 4,206 / 800)</td></tr>
+    <tr><td>Honest test</td><td>leave one signer out: train on two signers, test on all clips of the third</td></tr>
+    <tr><td>Data quality</td><td>22% of clips lose a hand for a few frames mid-sign; 15 signs under 95% hand coverage, worst near the face (pharynx 71%, thermometer 83%). Full table: <code>reports/data_quality.md</code></td></tr>
+  </table></div>
+  <h3>Other datasets considered</h3>
+  <div class="scroll"><table>
+    <tr><th>Dataset</th><th>What it adds</th><th>Status</th></tr>
+    <tr><td>Isharah (IAU / KFUPM)</td><td>Saudi sign language, 18 signers, 30,000 smartphone clips, continuous sentences, keypoints available</td><td>Needs terms acceptance by the user; sentences would need splitting into signs</td></tr>
+    <tr><td>Google ASL Signs (Kaggle)</td><td>About 94,000 clips, 250 ASL signs, MediaPipe landmarks in the same format</td><td>Candidate for pre-training the movement encoder; needs a Kaggle account</td></tr>
+    <tr><td>KArSL-502</td><td>402 more signs, same 3 signers</td><td>More vocabulary, not more signers</td></tr>
+    <tr><td>Own recordings (teach mode)</td><td>The user's own signing style</td><td>Built into the app; the most direct way to adapt to one person</td></tr>
+  </table></div>
+</section>
+
+<section id="pipeline">
+  <h2>How it works</h2>
+<pre>camera frame (laptop webcam or phone)
+   └─ MediaPipe Holistic ── 33 body points + 21 points per hand (+ face points)
+        └─ hand recovery: if a raised hand is lost, run the hand model on a crop around the wrist
+             └─ 155 numbers per frame: 9 upper-body points, 2 × 21 hand points (x, y, z),
+                2 "hand present" flags; centred on the shoulders, scaled by shoulder width,
+                corrected to the 16:9 training aspect
+                  └─ sign segmentation: starts when a hand rises, ends when hands are lowered,
+                     held still for 1 s, or Done is pressed
+                       └─ cleaning: fill short gaps (≤ 8 frames), smooth, trim still frames
+                            └─ resample to 32 frames → features: wrist-local hands, velocity,
+                               movement trajectory
+                                 └─ Transformer encoder (2 layers, 450k weights) → 100 scores
+                                      └─ best sub-window search → one Arabic + English answer</pre>
+  <p>The same code path is used for training, evaluation, the OpenCV demo and the web app, so what the model learns is exactly what it sees live.</p>
+</section>
+
+<section id="code">
+  <h2>Code structure</h2>
+  <div class="scroll"><table>
+    <tr><th>File</th><th>What it does</th></tr>
+    <tr><td><code>src/ssl_recognition/landmarks.py</code></td><td>MediaPipe wrapper, 155-number feature vector, aspect correction, mirroring, hand recovery, face points</td></tr>
+    <tr><td><code>src/ssl_recognition/features.py</code></td><td>Gap filling, smoothing, still-frame trimming, wrist-local hands, velocity, trajectory features</td></tr>
+    <tr><td><code>src/ssl_recognition/data.py</code></td><td>Clip files, resampling, augmentation (mirror, crop, scale, shift, hand dropout, hand shift), splits</td></tr>
+    <tr><td><code>src/ssl_recognition/model.py</code>, <code>model_transformer.py</code></td><td>Bidirectional GRU and Transformer classifiers</td></tr>
+    <tr><td><code>src/ssl_recognition/train.py</code>, <code>evaluate.py</code></td><td>Training loop (AdamW, one-cycle LR, label smoothing), checkpoint selection, top-1 / top-5</td></tr>
+    <tr><td><code>src/ssl_recognition/infer.py</code>, <code>record.py</code></td><td>Predictor (PyTorch or ONNX), OpenCV demo, webcam clip recorder</td></tr>
+    <tr><td><code>scripts/</code></td><td>KArSL preparation, parallel landmark extraction, ONNX export, CPU benchmark, data-quality report, raise simulation</td></tr>
+    <tr><td><code>app/server.py</code></td><td>FastAPI server: WebSockets for live recognition, segmentation, phone-to-laptop relay, reference clips, teach mode API, HTTP + HTTPS</td></tr>
+    <tr><td><code>app/static/index.html</code>, <code>camera.html</code></td><td>Laptop display and phone camera pages; MediaPipe runs in the browser</td></tr>
+    <tr><td><code>app/personalise.py</code></td><td>Teach mode: fine-tunes on the user's own examples in the background, exports and swaps the model</td></tr>
+    <tr><td><code>configs/</code>, <code>runs/</code>, <code>tests/</code></td><td>One YAML file per experiment; each run folder keeps its config, labels, checkpoint and results; 30 automated tests</td></tr>
+  </table></div>
+</section>
+
+<section id="libs">
+  <h2>Libraries</h2>
+  <div class="scroll"><table>
+    <tr><th>Library</th><th>Version</th><th>Used for</th></tr>
+    <tr><td>Python</td><td class="n">3.11</td><td>Everything server-side (environment on D:)</td></tr>
+    <tr><td>MediaPipe (Tasks API)</td><td class="n">1.1.0</td><td>Holistic landmarks and the standalone hand model, offline extraction</td></tr>
+    <tr><td>MediaPipe Tasks Vision (JavaScript)</td><td class="n">0.10.21</td><td>Landmarks in the browser on the device GPU</td></tr>
+    <tr><td>PyTorch (CPU build)</td><td class="n">2.14.1</td><td>Model definition and training</td></tr>
+    <tr><td>ONNX / ONNX Runtime</td><td class="n">1.23 / 1.31</td><td>Exported model; 1.6 ms per prediction versus 3.0 ms in PyTorch</td></tr>
+    <tr><td>OpenCV</td><td class="n">5.0.0</td><td>Video decoding, resizing, demo window, reference clip strips</td></tr>
+    <tr><td>NumPy, PyYAML, tqdm</td><td class="n">—</td><td>Feature maths, experiment configs, progress bars</td></tr>
+    <tr><td>FastAPI, Uvicorn, cryptography</td><td class="n">0.143 / 0.54</td><td>Web server, WebSockets, self-signed HTTPS for the phone</td></tr>
+    <tr><td>gdown, py7zr, openpyxl</td><td class="n">6.4 / 1.1</td><td>Downloading and unpacking KArSL, reading its label sheet</td></tr>
+    <tr><td>pytest, ruff, GitHub Actions</td><td class="n">—</td><td>Tests, linting, automatic checks on every push</td></tr>
+  </table></div>
+</section>
+
+<section id="training">
+  <h2>Training and time</h2>
+  <p>Every model trains for 40 epochs on the laptop CPU with batch size 64, AdamW, a one-cycle learning rate and label smoothing 0.1. The best checkpoint is chosen on validation clips of the training signers (top-1, then lower loss).</p>
+  <div class="scroll"><table>
+    <tr><th>Job</th><th>Data</th><th>Time</th></tr>
+    <tr><td>Download KArSL-100, 3 signers</td><td>19 GB</td><td class="n">about 15 min</td></tr>
+    <tr><td>Landmark extraction, signer 01</td><td>5,006 videos, 3 workers</td><td class="n">183 min</td></tr>
+    <tr><td>Landmark extraction, signers 02 + 03</td><td>10,111 videos, 3 workers</td><td class="n">358 min</td></tr>
+    <tr><td>Re-extraction of 15 weak signs, full resolution</td><td>2,270 videos</td><td class="n">100 min</td></tr>
+    <tr><td>Re-extraction of all clips with hand recovery + face</td><td>15,117 videos</td><td class="n">about 9–10 h (running)</td></tr>
+    <tr><td>GRU, one signer, official split</td><td>3,606 train clips</td><td class="n">37 min</td></tr>
+    <tr><td>GRU, leave-one-signer-out (per fold)</td><td>about 8,600 train clips</td><td class="n">26–28 min</td></tr>
+    <tr><td>Transformer, leave-one-signer-out (per fold)</td><td>about 8,600 train clips</td><td class="n">24–26 min</td></tr>
+    <tr><td>Transformer, deployment model (all signers)</td><td>10,814 train clips</td><td class="n">31–33 min</td></tr>
+    <tr><td>Teach mode fine-tune (4 epochs)</td><td>2,500 KArSL + user clips</td><td class="n">about 3 min</td></tr>
+  </table></div>
+</section>
+
+<section id="results">
+  <h2>Results</h2>
+  <h3>Signer never seen in training (leave one signer out, mean of 3 folds, 15,117 test clips)</h3>
+  <div class="scroll"><table>
+    <tr><th>Step</th><th>Top-1</th><th>Top-5</th><th>Change</th></tr>
+    <tr><td>GRU, plain landmarks</td><td class="n">67.0%</td><td class="n">88.4%</td><td></td></tr>
+    <tr><td>+ wrist-local hands, velocity, hand dropout, dropout 0.5</td><td class="n">76.3%</td><td class="n">93.6%</td><td class="up">+9.3</td></tr>
+    <tr><td>+ stronger regularisation, validation-loss tie-break</td><td class="n">77.8%</td><td class="n">94.6%</td><td class="up">+1.5</td></tr>
+    <tr><td>Transformer instead of GRU</td><td class="n">83.3%</td><td class="n">96.0%</td><td class="up">+5.5</td></tr>
+    <tr><td>+ cleaned landmarks for weak signs, gap filling</td><td class="n">83.7%</td><td class="n">95.9%</td><td class="up">+0.4</td></tr>
+    <tr><td>+ hand recovery, movement focus</td><td colspan="3">training overnight</td></tr>
+  </table></div>
+  <p>For comparison, the best peer-reviewed signer-independent result on KArSL-100 is 68.2% (Transformer with hand and face keypoints, ACM TALLIP 2024).</p>
+  <h3>Other measurements</h3>
+  <div class="scroll"><table>
+    <tr><th>Measurement</th><th>Result</th></tr>
+    <tr><td>Official KArSL split, all 3 signers</td><td class="n">99.7% top-1 (2,400 test clips)</td></tr>
+    <tr><td>The 15 badly tracked signs, after cleanup</td><td class="n">82.6% → 85.3%</td></tr>
+    <tr><td>Mirrored camera (unseen signer)</td><td class="n">82.2% vs 81.2% normal: mirroring does not hurt</td></tr>
+    <tr><td>Camera shape before the aspect fix (unseen signer)</td><td class="n">16:9 83% · 4:3 78.5% · upright phone 40.3%; now equal</td></tr>
+    <tr><td>Hand raised from the lap before the sign (simulated)</td><td class="n">60.5% → 68.5% unseen signer with window search</td></tr>
+    <tr><td>Trachea (0076), unseen signer</td><td class="n">64%, mostly confused with respiratory device (0075)</td></tr>
+    <tr><td>Skeleton (0071), unseen signer</td><td class="n">98%</td></tr>
+    <tr><td>Speed on the laptop</td><td class="n">MediaPipe 48–71 ms per frame; classifier 1.6 ms (ONNX)</td></tr>
+  </table></div>
+</section>
+
+<section id="app">
+  <h2>The app</h2>
+  <p>Run <code>python -m app.server</code>. The laptop opens <b>http://localhost:8000</b>; the phone opens <b>https://&lt;laptop-ip&gt;:8443/camera</b> (QR code shown on the laptop).</p>
+  <div class="scroll"><table>
+    <tr><th>Feature</th><th>What it does</th></tr>
+    <tr><td>Final answer / live guesses</td><td>One word after each sign, or continuous guesses; the choice is remembered</td></tr>
+    <tr><td>Sign end detection</td><td>Ends when hands are lowered, held still for 1 s (bar fills while holding), or Done is pressed</td></tr>
+    <tr><td>Phone as camera</td><td>Phone films, laptop shows the result; camera picker and wide-angle button on the phone</td></tr>
+    <tr><td>Practice</td><td>Shows a word with its reference video and skeleton; marks it correct when the model agrees</td></tr>
+    <tr><td>Word list</td><td>All 100 signs in Arabic and English, searchable, each with its reference movement</td></tr>
+    <tr><td>Teach mode</td><td>Saves the user's own attempts and fine-tunes a personal model in about 3 minutes</td></tr>
+  </table></div>
+</section>
+
+<section id="problems">
+  <h2>Problems and fixes</h2>
+  <p>In the order they were met. Every fix was checked with a measurement or a test.</p>
+
+  <div class="issue"><h3>1. Landmark extraction too slow <span class="tag done">fixed</span></h3><dl>
+    <dt>Problem</dt><dd>1080p video through MediaPipe on one CPU core would have taken days for 15,000 clips.</dd>
+    <dt>Fix</dt><dd>Downscale frames before MediaPipe and run 3 worker processes in parallel.</dd>
+    <dt>Evidence</dt><dd>16 test videos: 1.2 min → 0.7 min; full dataset extracted in about 9 hours.</dd></dl></div>
+
+  <div class="issue"><h3>2. Near-perfect on known signers, weak on a new one <span class="tag done">improved</span></h3><dl>
+    <dt>Problem</dt><dd>99.6% on the official split but 67% on a signer never seen; validation hit 100% while the held-out signer did not.</dd>
+    <dt>Cause</dt><dd>The model memorised each signer's hand size and style.</dd>
+    <dt>Fix</dt><dd>Hand points relative to the wrist and hand size, heavier regularisation, a Transformer instead of the GRU.</dd>
+    <dt>Evidence</dt><dd>67.0% → 83.7% on unseen signers (table above).</dd></dl></div>
+
+  <div class="issue"><h3>3. Checkpoint choice was arbitrary <span class="tag done">fixed</span></h3><dl>
+    <dt>Problem</dt><dd>Validation accuracy reached 100% early, so every later epoch looked equally good.</dd>
+    <dt>Fix</dt><dd>Break ties with validation loss.</dd></dl></div>
+
+  <div class="issue"><h3>4. OpenCV demo window could not be closed or resized; interface unclear <span class="tag done">fixed</span></h3><dl>
+    <dt>Fix</dt><dd>Resizable window that closes with X, Esc or Q; then a full browser app with Arabic text, which OpenCV cannot draw.</dd></dl></div>
+
+  <div class="issue"><h3>5. Browser version slower than the desktop demo <span class="tag done">fixed</span></h3><dl>
+    <dt>Cause</dt><dd>Every frame was compressed, sent to the laptop and decoded before MediaPipe ran.</dd>
+    <dt>Fix</dt><dd>MediaPipe runs inside the browser on the device GPU; only 155 numbers are sent per frame.</dd></dl></div>
+
+  <div class="issue"><h3>6. Reference videos did not play <span class="tag done">fixed</span></h3><dl>
+    <dt>Cause</dt><dd>The browser refused to decode the KArSL video files.</dd>
+    <dt>Fix</dt><dd>Each reference clip is rendered once into a strip of 24 JPEG frames, cropped to the signer, and animated on the page.</dd></dl></div>
+
+  <div class="issue"><h3>7. Too many flickering guesses <span class="tag done">fixed</span></h3><dl>
+    <dt>Fix</dt><dd>"Final answer" mode: the stream is cut into single signs and one word is shown per sign; live guesses remain an option.</dd></dl></div>
+
+  <div class="issue"><h3>8. Two-movement signs were split in half (skull) <span class="tag done">fixed</span></h3><dl>
+    <dt>Cause</dt><dd>The hands vanish for a few frames between the two movements, which ended the sign.</dd>
+    <dt>Fix</dt><dd>A sign ends only after 0.7 s without hands, measured in time rather than frames.</dd>
+    <dt>Evidence</dt><dd>All 24 skull recordings give one correct answer at 30, 15 and 10 fps.</dd></dl></div>
+
+  <div class="issue"><h3>9. Raising the hand from the lap was read as part of the sign <span class="tag done">fixed</span></h3><dl>
+    <dt>Cause</dt><dd>KArSL clips start with the hand already raised; the model never saw the raise.</dd>
+    <dt>Fix</dt><dd>A sign starts only above a rest line, and the final answer uses the most confident sub-window.</dd>
+    <dt>Evidence</dt><dd>Unseen signer with a simulated raise: 60.5% → 68.5%, clean signs unchanged.</dd></dl></div>
+
+  <div class="issue"><h3>10. Phone could not connect; QR code vanished <span class="tag done">fixed</span></h3><dl>
+    <dt>Causes</dt><dd>Phones need HTTPS for the camera; Windows Firewall blocked the port; results from any camera hid the QR code.</dd>
+    <dt>Fix</dt><dd>Self-signed HTTPS, a one-line firewall rule run by the user, relay only from the phone page, one server process for both ports.</dd></dl></div>
+
+  <div class="issue"><h3>11. Hands lost in 22% of training clips <span class="tag done">improved</span></h3><dl>
+    <dt>Fix</dt><dd>Per-sign quality report; re-extraction of the 15 weakest signs at full resolution; interpolation of gaps up to 8 frames in training and live.</dd>
+    <dt>Evidence</dt><dd>Weak signs on unseen signers 82.6% → 85.3%, other signs unchanged.</dd></dl></div>
+
+  <div class="issue"><h3>12. Bug-fix review <span class="tag done">fixed</span></h3><dl>
+    <dt>Found</dt><dd>Features depended on the camera's shape (upright phone 40% vs 83%); a file-access hole on the reference endpoints; heavy work blocking the server; a crash risk when the laptop page reloaded; the demo mirrored frames unlike training; augmentation leaked values into missing hands.</dd>
+    <dt>Fix</dt><dd>Aspect correction to 16:9, id checks, worker threads, safe broadcast, raw-frame landmarking, masked augmentation. 30 tests now cover these.</dd></dl></div>
+
+  <div class="issue"><h3>13. Hands had to leave the frame to finish a sign <span class="tag done">fixed</span></h3><dl>
+    <dt>Fix</dt><dd>Holding the hands still for 1 s finishes the sign; a bar shows progress. Phone camera gets a lens picker and a wide-angle button.</dd>
+    <dt>Evidence</dt><dd>On KArSL, a 1 s hold would end about 2% of signs early (a 0.5 s hold: 10–16%).</dd></dl></div>
+
+  <div class="issue"><h3>14. Trachea read wrong; hand points wrong on the chest <span class="tag run">fix training</span></h3><dl>
+    <dt>Problem</dt><dd>Trachea 64% on unseen signers, mostly read as respiratory device.</dd>
+    <dt>Cause</dt><dd>MediaPipe Holistic loses a hand lying flat on the chest (against a striped shirt it lost 32 of 50 frames). Both signs end on the chest, so the model had almost no hand data to separate them.</dd>
+    <dt>Fix</dt><dd>When a raised hand is lost, run MediaPipe's dedicated hand model on a crop around the wrist. Same step in the live app. All clips re-extracted overnight.</dd>
+    <dt>Evidence so far</dt><dd>Signing-hand coverage on these signs 68% → 97% (worst clip 42% → 96%). Accuracy after retraining: pending.</dd></dl></div>
+
+  <div class="issue"><h3>15. Model relied on where the hand starts and ends <span class="tag run">fix training</span></h3><dl>
+    <dt>Fix</dt><dd>Smoothing, trimming still frames, movement-trajectory features relative to each hand's own position, random hand shifts in training, and dropping badly tracked clips. Compared against recovery-only overnight.</dd>
+    <dt>Limit</dt><dd>Trachea and respiratory device differ only in the starting place, so location cannot be ignored completely.</dd></dl></div>
+</section>
+
+<section id="next">
+  <h2>Next steps</h2>
+  <div class="scroll"><table>
+    <tr><th>Step</th><th>Why</th></tr>
+    <tr><td>Compare overnight results; switch the app to the better model</td><td>Measure trachea, respiratory device, overall and the raise test</td></tr>
+    <tr><td>Use the saved face points as features</td><td>Published work reports about +4%; the weak signs are near the face</td></tr>
+    <tr><td>Record own examples in teach mode for the hardest words</td><td>Adapts the model to the user's signing</td></tr>
+    <tr><td>Pre-train on Google ASL Signs or Isharah</td><td>More signers, better generalisation</td></tr>
+    <tr><td>Scale to all 502 KArSL signs</td><td>Larger vocabulary</td></tr>
+  </table></div>
+</section>
+
+<footer>Maintained by Claude Code for Meshal AlRubaie. Numbers come from the run folders (<code>runs/*/result.json</code>), <code>reports/results.md</code> and <code>reports/data_quality.md</code> in this repository.</footer>
+</main>
+</div>
+</body>
+</html>
