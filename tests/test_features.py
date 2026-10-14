@@ -77,3 +77,46 @@ def test_augment_keeps_absent_hands_exactly_zero():
         for blk, flag in ((LEFT_SLICE, LEFT_FLAG), (RIGHT_SLICE, RIGHT_FLAG)):
             absent = y[:, flag] <= 0
             assert not y[absent][:, blk].any()
+
+
+def test_trajectory_is_the_same_wherever_the_movement_is_made():
+    from ssl_recognition.features import TRAJ_DIM, transform
+
+    x = _clip(t=20)
+    path = np.linspace(0, 0.5, 20, dtype=np.float32)
+    blk = x[:, LEFT_SLICE].reshape(20, 21, 3)
+    blk[:, :, 0] = 0.2 + path[:, None]  # hand moves to the right
+    x[:, LEFT_SLICE] = blk.reshape(20, -1)
+    moved = x.copy()
+    b2 = moved[:, LEFT_SLICE].reshape(20, 21, 3)
+    b2[:, :, :2] += np.array(
+        [0.7, -0.4], np.float32
+    )  # same movement, elsewhere in front of the body
+    moved[:, LEFT_SLICE] = b2.reshape(20, -1)
+    cfg = {"features": {"trajectory": True}}
+    a, b = transform(x, cfg)[:, -TRAJ_DIM:], transform(moved, cfg)[:, -TRAJ_DIM:]
+    assert np.allclose(a, b, atol=1e-5)
+
+
+def test_motion_trim_drops_still_frames_at_both_ends():
+    from ssl_recognition.features import motion_trim
+
+    x = _clip(t=40)
+    blk = x[:, LEFT_SLICE].reshape(40, 21, 3)
+    blk[:] = 0.3
+    blk[10:30, :, 0] += np.linspace(0, 0.6, 20, dtype=np.float32)[:, None]  # moves only in 10-29
+    blk[30:, :, 0] = blk[29, :, 0]
+    x[:, LEFT_SLICE] = blk.reshape(40, -1)
+    y = motion_trim(x, thr=0.01, min_keep=0.3)
+    assert 18 <= len(y) <= 24
+
+
+def test_smooth_keeps_absent_hands_zero_and_reduces_jitter():
+    from ssl_recognition.features import smooth
+
+    x = _clip(t=30)
+    jitter = np.random.RandomState(0).normal(0, 0.05, (30, 63)).astype(np.float32)
+    x[:, LEFT_SLICE] = 0.5 + jitter
+    y = smooth(x, 3)
+    assert y[:, LEFT_SLICE].std(axis=0).mean() < x[:, LEFT_SLICE].std(axis=0).mean()
+    assert not y[:, RIGHT_SLICE].any()

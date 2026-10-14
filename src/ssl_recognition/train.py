@@ -35,6 +35,7 @@ def train(cfg: dict, test_signer: str | None = None) -> dict:
     seq_len = int(cfg.get("seq_len", 32))
 
     clips = load_dataset(Path(cfg["data_dir"]))
+    min_cov = float(cfg.get("min_hand_coverage", 0.0))
     label_map = build_label_map(clips)
     train_clips, val_clips, test_clips = split_clips(
         clips,
@@ -42,6 +43,16 @@ def train(cfg: dict, test_signer: str | None = None) -> dict:
         test_signer=test_signer,
         official=bool(cfg.get("official_split", False)) and test_signer is None,
     )
+    if min_cov > 0:  # train only on recordings whose hand tracking is good enough
+        from .features import fill_gaps
+
+        def coverage(c):
+            x = fill_gaps(c.x, int(cfg.get("fill_gaps", 8) or 8))
+            return float(((x[:, -2] + x[:, -1]) > 0).mean())
+
+        before = len(train_clips)
+        train_clips = [c for c in train_clips if coverage(c) >= min_cov]
+        print(f"dropped {before - len(train_clips)} training clips with hand coverage < {min_cov}")
     print(
         f"clips: train={len(train_clips)} val={len(val_clips)} test={len(test_clips)} "
         f"classes={len(label_map)}"

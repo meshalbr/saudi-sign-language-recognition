@@ -70,8 +70,12 @@ def resample(x: np.ndarray, seq_len: int) -> np.ndarray:
     return (x[lo] * (1 - w) + x[hi] * w).astype(np.float32)
 
 
-def augment(x: np.ndarray, rng: random.Random, hand_drop: float = 0.0) -> np.ndarray:
-    """Random mirror, time-scale, scale, shift, jitter and optional hand-block dropout."""
+def augment(
+    x: np.ndarray, rng: random.Random, hand_drop: float = 0.0, hand_shift: float = 0.0
+) -> np.ndarray:
+    """Random mirror, time-scale, scale, shift, jitter, optional hand-block dropout and an
+    optional independent shift of each hand (so exact position in front of the body matters
+    less than the movement)."""
     y = x
     if rng.random() < 0.5:
         y = mirror_features(y)
@@ -96,6 +100,16 @@ def augment(x: np.ndarray, rng: random.Random, hand_drop: float = 0.0) -> np.nda
         coords + rng.gauss(0, 1) * 0.0 + np.random.normal(0, 0.01, coords.shape).astype(np.float32)
     )
     y = np.concatenate([coords.reshape(len(y), -1), y[:, FEATURE_DIM - 2 :]], axis=1)
+    if hand_shift > 0:
+        for blk, wrist_cols in ((LEFT_SLICE, (15, 16)), (RIGHT_SLICE, (18, 19))):
+            off = np.array(
+                [rng.uniform(-hand_shift, hand_shift), rng.uniform(-hand_shift, hand_shift)],
+                dtype=np.float32,
+            )
+            h = y[:, blk].reshape(len(y), -1, 3)
+            h[:, :, :2] += off
+            y[:, blk] = h.reshape(len(y), -1)
+            y[:, list(wrist_cols)] += off  # keep the pose wrist with its hand
     # Absent hands and frames without a pose are exactly zero at inference; keep them zero here.
     y[y[:, LEFT_FLAG] <= 0, LEFT_SLICE] = 0.0
     y[y[:, RIGHT_FLAG] <= 0, RIGHT_SLICE] = 0.0
@@ -188,10 +202,11 @@ class ClipDataset:
     def __getitem__(self, i: int):
         import torch
 
-        from .features import fill_gaps, transform
+        from .features import preprocess, transform
 
         c = self.clips[i]
-        x = fill_gaps(c.x, int(self.cfg.get("fill_gaps", 0))) if self.cfg.get("fill_gaps") else c.x
-        x = augment(x, self.rng, self.hand_drop) if self.train else x
+        x = preprocess(c.x, self.cfg)
+        if self.train:
+            x = augment(x, self.rng, self.hand_drop, float(self.cfg.get("hand_shift", 0.0)))
         x = transform(resample(x, self.seq_len), self.cfg)
         return torch.from_numpy(x), self.label_map[c.label]

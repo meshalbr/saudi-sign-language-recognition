@@ -1,0 +1,28 @@
+# KArSL-100 LOSO, recovered landmarks + movement focus (smoothing, trimming, trajectory, hand shift)
+data_dir: data/landmarks_v3
+official_split: false
+seq_len: 32
+batch_size: 64
+epochs: 40
+lr: 0.001
+weight_decay: 0.001
+hidden: 128
+layers: 2
+dropout: 0.5
+augment: true
+seed: 42
+out_dir: runs/p5_s02_motion
+features:
+  hand_local: true
+  velocity: true
+  trajectory: true
+hand_drop: 0.3
+model: transformer
+heads: 4
+fill_gaps: 8
+hand_recovery: true
+min_hand_coverage: 0.6
+hand_shift: 0.25
+preprocess:
+  smooth: 3
+  motion_trim: 0.01
