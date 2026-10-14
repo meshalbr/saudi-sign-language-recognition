@@ -11,6 +11,7 @@ On-disk layout (one .npz per clip):
 from __future__ import annotations
 
 import json
+import os
 import random
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,7 +41,10 @@ def save_clip(
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     extra = {} if face is None else {"face": face.astype(np.float32)}
-    np.savez_compressed(path, x=x.astype(np.float32), label=label, signer=signer, fps=fps, **extra)
+    # write to a temporary file and rename, so an interrupted run never leaves a broken clip
+    tmp = path.with_name(path.stem + ".partial.npz")
+    np.savez_compressed(tmp, x=x.astype(np.float32), label=label, signer=signer, fps=fps, **extra)
+    os.replace(tmp, path)
 
 
 def load_clip(path: Path) -> Clip:
