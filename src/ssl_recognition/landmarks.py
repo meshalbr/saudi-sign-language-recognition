@@ -37,6 +37,14 @@ RIGHT_FLAG = FEATURE_DIM - 1
 # to this aspect (x and z scaled by aspect / TRAIN_ASPECT) so they match training exactly.
 TRAIN_ASPECT = 1920 / 1080
 
+# Face reference points (MediaPipe face mesh indices). Many signs are defined by where the hand
+# is relative to the face (nose vs mouth vs chin/throat); published KArSL work reports about +4%
+# from adding face keypoints. Order: nose tip, chin, forehead, upper lip, lower lip, then mirror
+# pairs (left, right): mouth corners, outer eye corners, inner eye corners, cheeks.
+FACE_IDX = [1, 152, 10, 13, 14, 61, 291, 33, 263, 133, 362, 234, 454]
+FACE_MIRROR_PAIRS = [(5, 6), (7, 8), (9, 10), (11, 12)]
+N_FACE = len(FACE_IDX)
+
 DEFAULT_MODEL = Path(__file__).resolve().parents[2] / "models" / "holistic_landmarker.task"
 HAND_MODEL = Path(__file__).resolve().parents[2] / "models" / "hand_landmarker.task"
 HAND_MODEL_URL = (
@@ -106,6 +114,36 @@ def features_from_arrays(
     return feat
 
 
+def face_from_arrays(
+    pose: np.ndarray | None, face: np.ndarray | None, aspect: float = TRAIN_ASPECT
+) -> np.ndarray:
+    """(N_FACE, 3) face reference points in the same body frame as the hand features
+    (shoulder midpoint at the origin, one shoulder width = 1). Zeros if pose or face is missing."""
+    out = np.zeros((N_FACE, 3), dtype=np.float32)
+    if pose is None or face is None or len(face) <= max(FACE_IDX):
+        return out
+    k = float(aspect) / TRAIN_ASPECT
+    fix = np.array([k, 1.0, k], dtype=np.float32)
+    pose = pose * fix
+    pts = face[FACE_IDX] * fix
+    l_sh, r_sh = pose[11], pose[12]
+    center = (l_sh + r_sh) / 2.0
+    scale = float(np.linalg.norm((l_sh - r_sh)[:2]))
+    if not np.isfinite(scale) or scale < 1e-3:
+        scale = 1.0
+    out[:] = (pts - center) / scale
+    return out
+
+
+def mirror_face(f: np.ndarray) -> np.ndarray:
+    """Mirror a (T, N_FACE, 3) face block: negate x and swap left/right points."""
+    g = f.copy()
+    for a, b in FACE_MIRROR_PAIRS:
+        g[:, [a, b]] = g[:, [b, a]]
+    g[:, :, 0] *= -1
+    return g
+
+
 def features_from_result(result, aspect: float = TRAIN_ASPECT) -> np.ndarray:
     """Build the feature vector from a HolisticLandmarkerResult (``aspect`` = frame W / H)."""
     pose = _to_array(result.pose_landmarks, 33)
@@ -169,6 +207,7 @@ class HolisticExtractor:
         self._last_ts = -1
         self.last_result = None
         self.recovered = {"left": None, "right": None}  # (21,3) arrays recovered this frame
+        self.last_face = np.zeros((N_FACE, 3), dtype=np.float32)  # face block of the last frame
         self._hand = None
         if recover and Path(HAND_MODEL).exists():
             self._hand = vision.HandLandmarker.create_from_options(
@@ -196,6 +235,12 @@ class HolisticExtractor:
         pose = _to_array(self.last_result.pose_landmarks, 33)
         left = _to_array(self.last_result.left_hand_landmarks, N_HAND)
         right = _to_array(self.last_result.right_hand_landmarks, N_HAND)
+        face = None
+        if self.last_result.face_landmarks:
+            f0 = self.last_result.face_landmarks
+            f0 = f0[0] if isinstance(f0[0], list) else f0
+            face = np.array([[lm.x, lm.y, lm.z] for lm in f0], dtype=np.float32)
+        self.last_face = face_from_arrays(pose, face, aspect=w / h)
         self.recovered = {"left": None, "right": None}
         if self._hand is not None and pose is not None and (left is None or right is None):
             rec = recover_hands(self._hand, self._mp, rgb, pose, left is None, right is None)

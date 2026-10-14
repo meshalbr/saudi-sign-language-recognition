@@ -257,6 +257,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
       const vision=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/vision_bundle.mjs');
       const files=await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm');
       landmarker=await vision.HolisticLandmarker.createFromOptions(files,{baseOptions:{modelAssetPath:'/models/holistic_landmarker.task',delegate:'GPU'},runningMode:'VIDEO',minPoseDetectionConfidence:0.5,minPoseLandmarksConfidence:0.5,minHandLandmarksConfidence:0.5});
+      const recInfo=await fetch('/api/info').then(r=>r.json()).catch(()=>({})); if(recInfo.hand_recovery) handLm=await vision.HandLandmarker.createFromOptions(files,{baseOptions:{modelAssetPath:'/models/hand_landmarker.task',delegate:'GPU'},runningMode:'IMAGE',numHands:2,minHandDetectionConfidence:0.3,minHandPresenceConfidence:0.3}).catch(()=>null);
       fastMode=true; $('cSrv').textContent='browser landmarks'; $('btnMode').textContent='Mode: browser';
     }catch(e){ console.warn('browser landmarker unavailable, using server path:',e); fastMode=false; $('btnMode').textContent='Mode: server'; }
   }
@@ -269,6 +270,34 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
       if(!landmarker&&!fastMode){ $('cSrv').textContent='loading model…'; await loadLandmarker(); }
       connect();
     }catch(e){ $('gateErr').textContent='Camera blocked: '+e.message+(location.protocol==='http:'&&location.hostname!=='localhost'?' (phones need the https address)':''); }
+  }
+
+
+  // Hand recovery (same rule as ssl_recognition.landmarks.recover_hands): when Holistic loses a
+  // raised hand (e.g. flat on the chest), run the standalone hand model on a crop around the wrist.
+  let handLm=null; const recCanvas=document.createElement('canvas'), recCtx=recCanvas.getContext('2d');
+  const REC_SIDES=[['left',[15,17,19],'leftHandLandmarks'],['right',[16,18,20],'rightHandLandmarks']];
+  function recoverHands(res, src){
+    const pose=res.poseLandmarks&&res.poseLandmarks[0]; if(!handLm||!pose||pose.length<33) return res;
+    const W=src.videoWidth, H=src.videoHeight; if(!W||!H) return res;
+    const sw=Math.hypot((pose[11].x-pose[12].x)*W,(pose[11].y-pose[12].y)*H); if(sw<5) return res;
+    for(const [side,[wr,pk,ix],key] of REC_SIDES){
+      if(res[key]&&res[key][0]&&res[key][0].length>=21) continue;
+      if(pose[wr].y>0.85) continue;
+      const cx=(pose[wr].x+pose[pk].x+pose[ix].x)/3*W, cy=(pose[wr].y+pose[pk].y+pose[ix].y)/3*H, half=Math.max(16,Math.round(sw*0.55));
+      const x0=Math.max(0,Math.round(cx-half)), y0=Math.max(0,Math.round(cy-half)), x1=Math.min(W,Math.round(cx+half)), y1=Math.min(H,Math.round(cy+half));
+      if(x1-x0<16||y1-y0<16) continue;
+      recCanvas.width=x1-x0; recCanvas.height=y1-y0; recCtx.drawImage(src,x0,y0,x1-x0,y1-y0,0,0,x1-x0,y1-y0);
+      let out; try{ out=handLm.detect(recCanvas); }catch(e){ continue; }
+      let best=null, bestD=1e9;
+      for(const lms of (out.landmarks||[])){
+        const a=lms.map(p=>({x:(x0+p.x*(x1-x0))/W, y:(y0+p.y*(y1-y0))/H, z:p.z*(x1-x0)/W}));
+        const d=Math.hypot((a[0].x-pose[wr].x)*W,(a[0].y-pose[wr].y)*H)/sw;
+        if(d<0.6&&d<bestD){ best=a; bestD=d; }
+      }
+      if(best){ res[key]=[best]; }
+    }
+    return res;
   }
 
   // Feature vector identical to ssl_recognition.landmarks.features_from_arrays (155 numbers)
@@ -290,7 +319,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   function fastStep(){
     if(!fastMode||!landmarker||!ws||ws.readyState!==1||inflight||!video.videoWidth||video.readyState<2) return;
     let ts=performance.now(); if(ts-lastTs<30) return; lastTs=ts;  // ~30 fps, like the training videos
-    const res=landmarker.detectForVideo(video,ts);
+    const res=recoverHands(landmarker.detectForVideo(video,ts), video);
     const {f,lm}=featuresFromResult(res);
     drawLandmarks(lm); lastLm=lm;
     const msg={f:Array.from(f,v=>Math.round(v*10000)/10000),t:ts}; if(forceEnd){ msg.end=true; forceEnd=false; }

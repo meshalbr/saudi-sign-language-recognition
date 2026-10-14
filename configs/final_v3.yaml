@@ -19,3 +19,4 @@ hand_drop: 0.3
 model: transformer
 heads: 4
 fill_gaps: 8
+hand_recovery: true

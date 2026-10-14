@@ -35,9 +35,12 @@ class Clip:
     path: Path
 
 
-def save_clip(path: Path, x: np.ndarray, label: str, signer: str, fps: float) -> None:
+def save_clip(
+    path: Path, x: np.ndarray, label: str, signer: str, fps: float, face: np.ndarray | None = None
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(path, x=x.astype(np.float32), label=label, signer=signer, fps=fps)
+    extra = {} if face is None else {"face": face.astype(np.float32)}
+    np.savez_compressed(path, x=x.astype(np.float32), label=label, signer=signer, fps=fps, **extra)
 
 
 def load_clip(path: Path) -> Clip:

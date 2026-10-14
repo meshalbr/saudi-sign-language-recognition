@@ -29,10 +29,10 @@ VIDEO_EXT = {".mp4", ".avi", ".mov", ".mkv", ".wmv"}
 
 def extract_video(
     ex: HolisticExtractor, path: Path, max_frames: int, width: int
-) -> tuple[np.ndarray, float]:
+) -> tuple[np.ndarray, float, np.ndarray]:
     cap = cv2.VideoCapture(str(path))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    feats = []
+    feats, faces = [], []
     i = 0
     while True:
         ok, frame = cap.read()
@@ -42,11 +42,12 @@ def extract_video(
             h = int(frame.shape[0] * width / frame.shape[1])
             frame = cv2.resize(frame, (width, h), interpolation=cv2.INTER_AREA)
         feats.append(ex.process(frame, int(i * 1000 / fps)))
+        faces.append(ex.last_face.copy())
         i += 1
     cap.release()
     if not feats:
         raise RuntimeError(f"no frames read from {path}")
-    return np.stack(feats), fps
+    return np.stack(feats), fps, np.stack(faces)
 
 
 def _signer_of(v: Path, fixed: str | None, from_name: bool) -> str:
@@ -68,8 +69,8 @@ def _worker(job: tuple) -> tuple[int, int, int, list[str]]:
                 skipped += 1
                 continue
             try:
-                x, fps = extract_video(ex, v, max_frames, width)
-                save_clip(dest, x, v.parent.name, _signer_of(v, signer, from_name), fps)
+                x, fps, face = extract_video(ex, v, max_frames, width)
+                save_clip(dest, x, v.parent.name, _signer_of(v, signer, from_name), fps, face=face)
                 done += 1
             except Exception as e:  # noqa: BLE001 - keep going over a big dataset
                 failed += 1

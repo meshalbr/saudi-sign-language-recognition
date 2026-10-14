@@ -77,6 +77,11 @@ def labels():
     return JSONResponse(STATE["labels"])
 
 
+def model_uses_recovery() -> bool:
+    """Hand recovery is applied live only for models trained on recovered landmarks."""
+    return bool(predictor().cfg.get("hand_recovery", False))
+
+
 def _valid_sid(sid: str) -> bool:
     predictor()
     return sid in {lab["id"] for lab in STATE["labels"]}
@@ -438,6 +443,14 @@ class Session:
         return out
 
 
+@app.get("/models/hand_landmarker.task")
+def hand_model_file():
+    """Standalone hand model used by the browser for hand recovery."""
+    from ssl_recognition.landmarks import HAND_MODEL
+
+    return FileResponse(HAND_MODEL, media_type="application/octet-stream")
+
+
 @app.websocket("/ws_feat")
 async def ws_feat(websocket: WebSocket):
     """Fast path: the browser runs MediaPipe and sends feature rows (text). It may also send small
@@ -478,7 +491,7 @@ async def ws(websocket: WebSocket):
     relay = websocket.query_params.get("role") == "camera"
     sess = Session(relay=relay)
     t0 = time.time()
-    with HolisticExtractor() as ex:
+    with HolisticExtractor(recover=model_uses_recovery()) as ex:
         try:
             while True:
                 m = await websocket.receive()
@@ -601,7 +614,11 @@ def camera_page():
 @app.get("/api/info")
 def info():
     port = STATE.get("https_port", 8443)
-    return {"camera_url": f"https://{lan_ip()}:{port}/camera", "displays": len(DISPLAYS)}
+    return {
+        "camera_url": f"https://{lan_ip()}:{port}/camera",
+        "displays": len(DISPLAYS),
+        "hand_recovery": model_uses_recovery(),
+    }
 
 
 def ensure_cert() -> tuple[Path, Path]:
