@@ -21,6 +21,11 @@ video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .row{display:flex;gap:10px}
 button{font:inherit;font-weight:600;border:0;border-radius:12px;padding:14px;flex:1;background:rgba(255,255,255,.12);color:var(--ink)}
 button.primary{background:var(--teal);color:#06282B}
+select{font:inherit;border:0;border-radius:12px;padding:12px;background:rgba(255,255,255,.12);color:var(--ink);flex:1;min-width:0}
+select option{color:#111}
+.still{height:8px;border-radius:4px;background:rgba(255,255,255,.15);overflow:hidden}
+.still i{display:block;height:100%;width:0;background:var(--green);transition:width .1s}
+.hint{font-size:12px;color:var(--muted);text-align:center;min-height:1.2em}
 .gate{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;background:var(--bg)}
 .gate h1{font-size:22px;margin:0} .gate p{color:var(--muted);margin:0;max-width:34ch}
 [hidden]{display:none!important}
@@ -31,7 +36,10 @@ button.primary{background:var(--teal);color:#06282B}
 <div class="top"><span class="chip" id="cConn">connecting…</span><span class="chip" id="cMode">—</span><span class="chip" id="cFps">0 fps</span></div>
 <div class="bottom">
   <div class="word" id="word"></div>
-  <div class="state" id="state">Sign, then lower your hands. The result shows on the laptop.</div>
+  <div class="state" id="state">Raise your hands to sign. Hold still for 1 second, or lower your hands, to finish.</div>
+  <div class="still" id="stillBar" hidden><i id="stillFill"></i></div>
+  <div class="row"><select id="camSel" aria-label="Camera"><option value="">Front camera</option></select><button id="btnWide">Wide angle</button></div>
+  <div class="hint" id="camHint"></div>
   <div class="row"><button id="btnFlip">Switch camera</button><button class="primary" id="btnDone">Done</button></div>
 </div>
 <div class="gate" id="gate">
@@ -100,22 +108,48 @@ function connect(){
   ws.onmessage=e=>{ inflight=false; const r=JSON.parse(e.data);
     fpsN++; const now=performance.now(); if(now-fpsT>1000){$('cFps').textContent=Math.round(fpsN*1000/(now-fpsT))+' fps'; fpsN=0; fpsT=now;}
     if(!fast&&r.lm) draw(r.lm);
-    if(r.final){ $('word').textContent=r.final[0].ar||r.final[0].en; $('state').textContent='Got it. Sign the next word.'; $('state').className='state got'; }
-    else if(r.recording>0){ $('state').textContent='Recording sign…'; $('state').className='state rec'; }
+    const still=r.still||0; $('stillBar').hidden=!(r.recording>0); $('stillFill').style.width=(still*100)+'%';
+    if(r.final){ $('word').textContent=r.final[0].ar||r.final[0].en; $('state').textContent='Got it'+(r.end_reason?' ('+r.end_reason+')':'')+'. Sign the next word.'; $('state').className='state got'; $('stillBar').hidden=true; }
+    else if(r.recording>0){ $('state').textContent=still>0.15?'Hold still… finishing':'Signing… hold still 1 s or lower your hands to finish'; $('state').className='state rec'; }
   };
   ws.onclose=()=>{ $('cConn').textContent='reconnecting…'; $('cConn').classList.remove('on'); setTimeout(connect,1200); };
+}
+let deviceId='';
+async function listCameras(){
+  try{
+    const devs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
+    const sel=$('camSel'); const cur=deviceId;
+    sel.innerHTML=devs.map((d,i)=>`<option value="${d.deviceId}">${d.label||('Camera '+(i+1))}</option>`).join('');
+    if(cur) sel.value=cur; else { const t=stream&&stream.getVideoTracks()[0]; const s=t&&t.getSettings(); if(s&&s.deviceId) sel.value=s.deviceId; }
+    return devs;
+  }catch(e){ return []; }
 }
 async function start(){
   try{
     if(stream) stream.getTracks().forEach(t=>t.stop());
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:640},height:{ideal:480}},audio:false});
+    // 4:3 keeps the sensor's full field of view on most phones (16:9 crops the top and bottom)
+    const v=deviceId?{deviceId:{exact:deviceId},width:{ideal:640},height:{ideal:480}}:{facingMode:facing,width:{ideal:640},height:{ideal:480}};
+    stream=await navigator.mediaDevices.getUserMedia({video:v,audio:false});
     video.srcObject=stream; await video.play(); $('gate').hidden=true;
     if(!landmarker&&!ws){ $('cMode').textContent='loading model…'; await loadLandmarker(); }
     if(!ws){ connect(); requestAnimationFrame(step); }
     try{ await navigator.wakeLock?.request('screen'); }catch(e){}
+    await listCameras();
   }catch(e){ $('err').textContent='Camera blocked: '+e.message; }
 }
 $('btnStart').onclick=start;
+$('camSel').onchange=e=>{ deviceId=e.target.value; const lab=e.target.selectedOptions[0]?.textContent||''; $('stage').classList.toggle('mirror',/front|user/i.test(lab)); start(); };
+// Wide angle: zoom the current lens out as far as it allows, or switch to an ultra-wide lens
+$('btnWide').onclick=async()=>{
+  const track=stream&&stream.getVideoTracks()[0]; const caps=track&&track.getCapabilities?track.getCapabilities():{};
+  if(caps.zoom&&caps.zoom.min<(track.getSettings().zoom||1)){
+    try{ await track.applyConstraints({advanced:[{zoom:caps.zoom.min}]}); $('camHint').textContent=`Zoomed out to ${caps.zoom.min}x.`; return; }catch(e){}
+  }
+  const devs=await listCameras();
+  const wide=devs.find(d=>/ultra|wide|0[.,]5/i.test(d.label));
+  if(wide&&wide.deviceId!==deviceId){ deviceId=wide.deviceId; $('camSel').value=deviceId; $('stage').classList.remove('mirror'); await start(); $('camHint').textContent='Switched to '+wide.label+'.'; return; }
+  $('camHint').textContent='This browser does not offer a wider lens. Pick another camera in the list, or move the phone back so your hands and hips are in view.';
+};
 $('btnDone').onclick=()=>{ forceEnd=true; };
 $('btnFlip').onclick=()=>{ facing=facing==='user'?'environment':'user'; $('stage').classList.toggle('mirror',facing==='user'); start(); };
 </script>

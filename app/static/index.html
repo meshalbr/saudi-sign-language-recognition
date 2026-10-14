@@ -135,7 +135,8 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
         <button class="segbtn" id="showFinal" aria-pressed="true">Final answer</button>
         <button class="segbtn" id="showLive" aria-pressed="false">Live guesses</button>
       </div>
-      <div class="state" id="rState"><span class="dot"></span><span id="rStateText">Ready. Raise your hands to sign, lower them when done.</span><button class="btn ghost small" id="btnDone">Done</button></div>
+      <div class="state" id="rState"><span class="dot"></span><span id="rStateText">Ready. Raise your hands to sign; hold still 1 s or lower them to finish.</span><button class="btn ghost small" id="btnDone">Done</button></div>
+      <div class="bar" id="stillBar" hidden title="hold still to finish"><i id="stillFill" class="ok"></i></div>
       <div class="word" id="rWord">—</div>
       <div class="en" id="rEn">Show your hands to the camera</div>
       <div class="id" id="rId"></div>
@@ -400,10 +401,11 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
     $('cHands').textContent='hands '+r.hands; $('cHands').classList.toggle('on',r.hands>0);
     if(r.lm) drawLandmarks(r.lm);
     // Final-answer mode: state line + one word per completed sign
-    if(r.final){ setState('got',`Got it (${r.final_frames} frames). Sign the next word.`); if(showMode==='final') showFinal(r.final);
+    const still=r.still||0; $('stillBar').hidden=!(r.recording>0)||showMode!=='final'; $('stillFill').style.width=(still*100)+'%';
+    if(r.final){ setState('got',`Got it (${r.end_reason||'finished'}). Sign the next word.`); $('stillBar').hidden=true; if(showMode==='final') showFinal(r.final);
       if(mode==='practice'&&target){ teachSave(); } if(mode==='practice'&&target&&!done.has(target.id)){ const f=r.final[0]; if(f.id===target.id) markDone(); else { $('pStatus').textContent=`You signed: ${f.ar||f.en}. Try again.`; $('pStatus').className='status'; } } }
-    else if(r.recording>0) setState('rec',`Recording sign… ${r.recording} frames. Lower your hands when done.`);
-    else if(!$('rState').classList.contains('got')) setState('','Ready. Raise your hands to sign, lower them when done.');
+    else if(r.recording>0) setState('rec', still>0.15 ? 'Hold still… finishing' : 'Signing… hold still 1 s or lower your hands to finish');
+    else if(!$('rState').classList.contains('got')) setState('','Ready. Raise your hands to sign; hold still 1 s or lower them to finish.');
     if(showMode==='final'){ return; }
     const top=r.top||[]; const best=top[0];
     if(best){ if(best.id===stable.id){stable.count++;} else {stable={id:best.id,count:1,fired:false};} } else { stable={id:null,count:0,fired:false}; }

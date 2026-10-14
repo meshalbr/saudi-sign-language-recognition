@@ -228,41 +228,110 @@ def is_active(feat: np.ndarray, rest_y: float = REST_Y) -> bool:
     return min(feat[WRIST_Y[0]], feat[WRIST_Y[1]]) < rest_y
 
 
+STILL_MS = 1000  # hands held still this long finish the sign (KArSL: ~2% of signs cut early)
+STILL_THR = 0.035  # max hand-centre movement during the hold, in shoulder widths
+L_HAND, R_HAND = slice(27, 90), slice(90, 153)
+
+
+def hand_centres(feat: np.ndarray) -> tuple[np.ndarray | None, np.ndarray | None]:
+    left = feat[L_HAND].reshape(21, 3)[:, :2].mean(0) if feat[153] > 0 else None
+    right = feat[R_HAND].reshape(21, 3)[:, :2].mean(0) if feat[154] > 0 else None
+    return left, right
+
+
 class Segmenter:
     """Cuts the stream into single signs.
 
     A sign starts when a wrist rises above the rest line (so raising your hand from your lap is
-    not part of the sign, matching how KArSL clips begin) and ends when both hands have been
-    below the line or out of view for ``gap_ms``. Short drop-outs inside a sign, such as the pause
-    between the two movements of "skull", stay inside the sign. Done ends it immediately."""
+    not part of the sign, matching how KArSL clips begin). It ends when any of these happens:
+    the hands are held still for ``still_ms``; both hands have been below the line or out of
+    view for ``gap_ms``; the sign reaches ``max_ms``; or the user presses Done. Short drop-outs
+    inside a sign, such as the pause between the two movements of "skull", stay inside it."""
 
-    def __init__(self, gap_ms: float = 700, min_len: int = 8, max_ms: float = 6000, rest_y=REST_Y):
+    def __init__(
+        self,
+        gap_ms: float = 700,
+        min_len: int = 8,
+        max_ms: float = 6000,
+        rest_y=REST_Y,
+        still_ms: float | None = STILL_MS,
+        still_thr: float = STILL_THR,
+        min_sign_ms: float = 800,
+    ):
         self.gap_ms, self.min_len, self.max_ms, self.rest_y = gap_ms, min_len, max_ms, rest_y
+        self.still_ms, self.still_thr, self.min_sign_ms = still_ms, still_thr, min_sign_ms
         self.seg: list[np.ndarray] = []
+        self.times: list[float] = []
         self.start_ms: float | None = None
         self.last_active_ms: float | None = None
-        self.last: np.ndarray | None = None  # last completed sign, for saving user examples
+        self.last: np.ndarray | None = None  # last completed sign
+        self.still_progress = 0.0  # 0..1, shown in the UI while holding still
+        self.end_reason = ""
+
+    def _still_run(self) -> tuple[float, int]:
+        """Length in ms of the trailing run in which every visible hand stayed within
+        ``still_thr``, and the index where that run starts."""
+        lo = {0: None, 1: None}
+        hi = {0: None, 1: None}
+        start = len(self.seg)
+        for i in range(len(self.seg) - 1, -1, -1):
+            if not is_active(self.seg[i], self.rest_y):
+                break
+            cs = hand_centres(self.seg[i])
+            moved = False
+            for h, c in enumerate(cs):
+                if c is None:
+                    continue
+                lo[h] = c if lo[h] is None else np.minimum(lo[h], c)
+                hi[h] = c if hi[h] is None else np.maximum(hi[h], c)
+                if np.linalg.norm(hi[h] - lo[h]) > self.still_thr:
+                    moved = True
+            if moved:
+                break
+            start = i
+        if start >= len(self.seg):
+            return 0.0, start
+        return self.times[-1] - self.times[start], start
 
     def push(self, feat: np.ndarray, t_ms: float) -> np.ndarray | None:
+        self.still_progress = 0.0
         if is_active(feat, self.rest_y):
             if not self.seg:
                 self.start_ms = t_ms
             self.seg.append(feat)
+            self.times.append(t_ms)
             self.last_active_ms = t_ms
             if self.start_ms is not None and t_ms - self.start_ms >= self.max_ms:
-                return self.flush()
+                return self.flush("time limit")
+            if self.still_ms and t_ms - self.start_ms >= self.min_sign_ms:
+                run_ms, run_start = self._still_run()
+                self.still_progress = min(1.0, run_ms / self.still_ms)
+                if run_ms >= self.still_ms:
+                    # keep a short part of the final hold, drop the rest of the waiting time
+                    keep_until = self.times[run_start] + 300
+                    cut = next(
+                        (i for i, t in enumerate(self.times) if t > keep_until), len(self.seg)
+                    )
+                    self.seg, self.times = (
+                        self.seg[: max(cut, run_start + 1)],
+                        self.times[: max(cut, run_start + 1)],
+                    )
+                    return self.flush("hands still")
         elif self.seg:
             self.seg.append(feat)
+            self.times.append(t_ms)
             if self.last_active_ms is not None and t_ms - self.last_active_ms >= self.gap_ms:
-                return self.flush()
+                return self.flush("hands lowered")
         return None
 
-    def flush(self) -> np.ndarray | None:
-        seg, self.seg, self.last_active_ms, self.start_ms = self.seg, [], None, None
+    def flush(self, reason: str = "done pressed") -> np.ndarray | None:
+        seg, self.seg, self.times = self.seg, [], []
+        self.last_active_ms, self.start_ms, self.still_progress = None, None, 0.0
         while seg and not is_active(seg[-1], self.rest_y):  # trim the lowering at the end
             seg.pop()
         if len(seg) < self.min_len:
             return None
+        self.end_reason = reason
         self.last = np.stack(seg)
         return self.last
 
@@ -353,12 +422,18 @@ class Session:
         if self.relay and RELAY["end"]:  # Done pressed on the laptop display
             RELAY["end"], end = False, True
         done = self.seg.flush() if end else self.seg.push(feat, t_ms)
-        out = {"top": self.top, "hands": int(feat[-2] + feat[-1]), "recording": len(self.seg.seg)}
+        out = {
+            "top": self.top,
+            "hands": int(feat[-2] + feat[-1]),
+            "recording": len(self.seg.seg),
+            "still": round(self.seg.still_progress, 2),
+        }
         if done is not None:
             final, span = best_window(predictor(), STATE["labels"], done)
             out["final"] = final
             out["final_frames"] = int(span[1] - span[0])
             out["final_span"] = [int(span[0]), int(span[1]), int(len(done))]
+            out["end_reason"] = self.seg.end_reason
             LAST_SIGN["x"] = done[span[0] : span[1]]  # what teach mode saves
         return out
 

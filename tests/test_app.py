@@ -67,23 +67,29 @@ def test_labels_and_one_frame():
     assert client.get("/api/ref/9999").status_code == 404
 
 
-def _frame(wrist_y: float | None, hand: bool = True) -> np.ndarray:
+def _frame(wrist_y: float | None, hand: bool = True, hand_x: float = 0.0) -> np.ndarray:
     f = np.zeros(155, np.float32)
     if wrist_y is not None:
         f[:27] = 0.1  # some pose present
         f[16] = f[19] = wrist_y
     if hand:
         f[-1] = 1.0
+        f[90:153:3] = hand_x  # right-hand x coordinates: the hand centre moves with hand_x
     return f
+
+
+def _moving(n: int, wrist_y: float, start: int = 0) -> list:
+    """n signing frames whose hand keeps moving (a real sign is never perfectly still)."""
+    return [_frame(wrist_y, hand_x=0.3 * np.sin((start + k) / 3.0)) for k in range(n)]
 
 
 def test_segmenter_keeps_short_dropouts_inside_one_sign():
     from app.server import Segmenter
 
-    up, gone, rest = _frame(0.5), _frame(None, hand=False), _frame(2.3)
+    gone, rest = _frame(None, hand=False), _frame(2.3)
     seg = Segmenter(gap_ms=700)
     # "skull": 20 frames, 4-frame drop-out between the two movements, 25 frames, then hands down
-    stream = [up] * 20 + [gone] * 4 + [up] * 25 + [rest] * 30
+    stream = _moving(20, 0.5) + [gone] * 4 + _moving(25, 0.5, 20) + [rest] * 30
     finals = [o for o in (seg.push(f, k * 33.3) for k, f in enumerate(stream)) if o is not None]
     assert len(finals) == 1
     assert len(finals[0]) == 49  # both movements plus the short gap, trailing rest trimmed
@@ -93,9 +99,9 @@ def test_segmenter_ignores_the_raise_from_rest():
     from app.server import Segmenter
 
     seg = Segmenter(gap_ms=700)
-    rest, rising, up = _frame(2.3), _frame(1.9), _frame(0.4)
+    rest, rising = _frame(2.3), _frame(1.9)
     # hands visible in the lap, raised through the rest line, signing, lowered back to the lap
-    stream = [rest] * 30 + [rising] * 6 + [up] * 30 + [rising] * 6 + [rest] * 40
+    stream = [rest] * 30 + [rising] * 6 + _moving(30, 0.4) + [rising] * 6 + [rest] * 40
     finals = [o for o in (seg.push(f, k * 33.3) for k, f in enumerate(stream)) if o is not None]
     assert len(finals) == 1
     assert len(finals[0]) == 30  # only the frames above the rest line
@@ -118,7 +124,32 @@ def test_segmenter_caps_a_sign_at_six_seconds():
     from app.server import Segmenter
 
     seg = Segmenter(max_ms=6000)
-    up = _frame(0.5)
-    outs = [seg.push(up, k * 33.3) for k in range(400)]  # 13 s of continuous signing
+    frames = _moving(400, 0.5)
+    outs = [seg.push(f, k * 33.3) for k, f in enumerate(frames)]  # 13 s of continuous signing
     lengths = [len(o) for o in outs if o is not None]
     assert len(lengths) == 2 and all(170 <= n <= 182 for n in lengths)
+
+
+def test_holding_still_finishes_the_sign_without_lowering_hands():
+    from app.server import Segmenter
+
+    seg = Segmenter(still_ms=1000)
+    # 1 s of movement, then the hands stay up and still: no lowering, no leaving the frame
+    stream = _moving(30, 0.5) + [_frame(0.5, hand_x=0.0)] * 60
+    outs = [seg.push(f, k * 33.3) for k, f in enumerate(stream)]
+    finals = [(k, o) for k, o in enumerate(outs) if o is not None]
+    assert len(finals) == 1
+    k, sign = finals[0]
+    assert seg.end_reason == "hands still"
+    assert 55 <= k <= 65  # about 1 s after the hands stopped
+    assert len(sign) <= 30 + 12  # the waiting time is not part of the sign
+
+
+def test_a_short_pause_inside_a_sign_does_not_finish_it():
+    from app.server import Segmenter
+
+    seg = Segmenter(still_ms=1000)
+    pause = [_frame(0.5, hand_x=0.1)] * 15  # 0.5 s hold in the middle of the sign
+    stream = _moving(30, 0.5) + pause + _moving(30, 0.5, 30) + [_frame(2.3)] * 30
+    finals = [o for o in (seg.push(f, k * 33.3) for k, f in enumerate(stream)) if o is not None]
+    assert len(finals) == 1 and len(finals[0]) == 75

@@ -38,7 +38,7 @@ def with_raise(x: np.ndarray, n_up: int = 15, n_down: int = 15, hold: int = 25) 
     return np.stack(up + list(x) + down + rest)
 
 
-def run(n: int = 200, seed: int = 1, run_dir: str = "runs/final_tf_all_official") -> None:
+def run(n: int = 200, seed: int = 1, run_dir: str = "runs/final_v2") -> None:
     from app import server
 
     server.STATE.update(run=run_dir, names="data/karsl_labels.json", window=40, stride=1)
