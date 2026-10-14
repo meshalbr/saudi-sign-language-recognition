@@ -85,7 +85,7 @@ footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);paddin
 
 <section id="status">
   <h2>Current status</h2>
-  <div class="note"><b>Running now (overnight 14–15 Oct):</b> all 15,117 videos are being re-extracted with the new hand-recovery step and face points (about 9–10 hours, 3 worker processes). When that finishes, two model versions train automatically on the three signer-held-out tests plus a final app model each: <i>recovery only</i> and <i>recovery + movement focus</i>. The better one replaces the app model. Results will be added to this page.</div>
+  <div class="note"><b>Running now (14–15 Oct):</b> all 15,117 videos are being re-extracted with the new hand-recovery step and face points (about 16–17 hours at 15 videos per minute with 3 worker processes; expected to finish about 4 PM on 15 Oct, results about 7–8 PM). When that finishes, two model versions train automatically on the three signer-held-out tests plus a final app model each: <i>recovery only</i> and <i>recovery + movement focus</i>. The better one replaces the app model. Results will be added to this page.</div>
   <div class="scroll"><table>
     <tr><th>Part</th><th>State</th></tr>
     <tr><td>Recognition pipeline, training, evaluation</td><td>Done <span class="tag done">done</span></td></tr>
@@ -192,7 +192,7 @@ footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);paddin
     <tr><td>Landmark extraction, signer 01</td><td>5,006 videos, 3 workers</td><td class="n">183 min</td></tr>
     <tr><td>Landmark extraction, signers 02 + 03</td><td>10,111 videos, 3 workers</td><td class="n">358 min</td></tr>
     <tr><td>Re-extraction of 15 weak signs, full resolution</td><td>2,270 videos</td><td class="n">100 min</td></tr>
-    <tr><td>Re-extraction of all clips with hand recovery + face</td><td>15,117 videos</td><td class="n">about 9–10 h (running)</td></tr>
+    <tr><td>Re-extraction of all clips with hand recovery + face</td><td>15,117 videos</td><td class="n">about 16–17 h (running)</td></tr>
     <tr><td>GRU, one signer, official split</td><td>3,606 train clips</td><td class="n">37 min</td></tr>
     <tr><td>GRU, leave-one-signer-out (per fold)</td><td>about 8,600 train clips</td><td class="n">26–28 min</td></tr>
     <tr><td>Transformer, leave-one-signer-out (per fold)</td><td>about 8,600 train clips</td><td class="n">24–26 min</td></tr>
