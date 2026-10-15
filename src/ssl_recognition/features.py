@@ -16,7 +16,15 @@ from __future__ import annotations
 
 import numpy as np
 
-from .landmarks import FEATURE_DIM, LEFT_FLAG, LEFT_SLICE, N_HAND, RIGHT_FLAG, RIGHT_SLICE
+from .landmarks import (
+    FEATURE_DIM,
+    LEFT_FLAG,
+    LEFT_SLICE,
+    N_FACE,
+    N_HAND,
+    RIGHT_FLAG,
+    RIGHT_SLICE,
+)
 
 COORD_DIM = FEATURE_DIM - 2  # everything except the two presence flags
 WRIST, MIDDLE_MCP = 0, 9
@@ -32,6 +40,7 @@ def feature_options(cfg: dict) -> dict:
         "hand_local": bool(f.get("hand_local", False)),
         "velocity": bool(f.get("velocity", False)),
         "trajectory": bool(f.get("trajectory", False)),
+        "face": bool(f.get("face", False)),
     }
 
 
@@ -41,6 +50,7 @@ def feature_dim(cfg: dict) -> int:
         FEATURE_DIM
         + (COORD_DIM if opts["velocity"] else 0)
         + (TRAJ_DIM if opts["trajectory"] else 0)
+        + (FACE_DIM if opts["face"] else 0)
     )
 
 
@@ -72,8 +82,36 @@ def _hand_local(block: np.ndarray, flag: np.ndarray) -> np.ndarray:
     return out.reshape(len(block), -1).astype(np.float32)
 
 
-def transform(x: np.ndarray, cfg: dict) -> np.ndarray:
-    """Apply the configured transforms to a (T, 155) clip. Returns (T, feature_dim(cfg))."""
+FACE_REL_POINTS = (0, 4, 8)  # wrist, thumb tip, index tip
+FACE_REFS = (0, 1)  # nose tip, chin (indices into FACE_IDX)
+FACE_DIM = N_FACE * 3 + 2 * len(FACE_REL_POINTS) * len(FACE_REFS) * 2
+
+
+def _face_block(x: np.ndarray, face: np.ndarray | None) -> np.ndarray:
+    """(T, FACE_DIM): the face points themselves (head position and tilt) plus where each hand's
+    wrist, thumb and index tip are relative to the nose and the chin. Zeros when missing."""
+    t = len(x)
+    out = np.zeros((t, FACE_DIM), dtype=np.float32)
+    if face is None:
+        return out
+    f = face.reshape(t, N_FACE, 3)
+    present_face = np.abs(f).sum(axis=(1, 2)) > 0
+    out[:, : N_FACE * 3] = f.reshape(t, -1)
+    k = N_FACE * 3
+    for blk, flag in ((LEFT_SLICE, LEFT_FLAG), (RIGHT_SLICE, RIGHT_FLAG)):
+        h = x[:, blk].reshape(t, N_HAND, 3)[:, list(FACE_REL_POINTS), :2]
+        ok = (x[:, flag] > 0) & present_face
+        for r in FACE_REFS:
+            rel = h - f[:, r : r + 1, :2]
+            rel[~ok] = 0.0
+            out[:, k : k + len(FACE_REL_POINTS) * 2] = rel.reshape(t, -1)
+            k += len(FACE_REL_POINTS) * 2
+    return out
+
+
+def transform(x: np.ndarray, cfg: dict, face: np.ndarray | None = None) -> np.ndarray:
+    """Apply the configured transforms to a (T, 155) clip (and its (T, 13, 3) face points).
+    Returns (T, feature_dim(cfg))."""
     opts = feature_options(cfg)
     y = x.astype(np.float32, copy=True)
     if opts["hand_local"]:
@@ -87,6 +125,8 @@ def transform(x: np.ndarray, cfg: dict) -> np.ndarray:
         y = np.concatenate([y, vel], axis=1)
     if traj is not None:
         y = np.concatenate([y, traj], axis=1)
+    if opts["face"]:
+        y = np.concatenate([y, _face_block(x, face)], axis=1)
     return y
 
 
@@ -141,28 +181,38 @@ def hand_speed(x: np.ndarray) -> np.ndarray:
 def motion_trim(x: np.ndarray, thr: float = 0.01, min_keep: float = 0.6) -> np.ndarray:
     """Drop still frames at the start and end so that holds before and after the movement do not
     count. Keeps at least ``min_keep`` of the clip, centred on the movement."""
+    a, b = motion_span(x, thr, min_keep)
+    return x[a:b]
+
+
+def motion_span(x: np.ndarray, thr: float = 0.01, min_keep: float = 0.6) -> tuple[int, int]:
+    """Start and end index kept by motion_trim."""
     n = len(x)
     if n < 8 or thr <= 0:
-        return x
+        return 0, n
     moving = np.where(hand_speed(x) > thr)[0]
     if len(moving) == 0:
-        return x
+        return 0, n
     a, b = max(0, int(moving[0]) - 1), min(n, int(moving[-1]) + 2)
     need = int(np.ceil(n * min_keep))
     if b - a < need:
         mid = (a + b) // 2
         a = max(0, min(mid - need // 2, n - need))
         b = a + need
-    return x[a:b]
+    return a, b
 
 
-def preprocess(x: np.ndarray, cfg: dict) -> np.ndarray:
-    """Clip-level cleaning shared by training and inference: gap filling, smoothing, trimming."""
+def preprocess(x: np.ndarray, cfg: dict, face: np.ndarray | None = None):
+    """Clip-level cleaning shared by training and inference: gap filling, smoothing, trimming.
+    Returns x, or (x, face) when face points are given (trimmed identically)."""
     pp = cfg.get("preprocess") or {}
     if cfg.get("fill_gaps"):
         x = fill_gaps(x, int(cfg["fill_gaps"]))
     if pp.get("smooth"):
         x = smooth(x, int(pp["smooth"]))
     if pp.get("motion_trim"):
-        x = motion_trim(x, float(pp["motion_trim"]))
-    return x
+        a, b = motion_span(x, float(pp["motion_trim"]))
+        x = x[a:b]
+        if face is not None:
+            face = face[a:b]
+    return x if face is None else (x, face)

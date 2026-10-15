@@ -302,6 +302,8 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
 
   // Feature vector identical to ssl_recognition.landmarks.features_from_arrays (155 numbers)
   const POSE_IDX=[0,11,12,13,14,15,16,23,24];
+  const FACE_IDX=[1,152,10,13,14,61,291,33,263,133,362,234,454];  // same as landmarks.FACE_IDX
+
   function featuresFromResult(res){
     const f=new Float32Array(155);
     const pose=(res.poseLandmarks&&res.poseLandmarks[0])||null; if(!pose||pose.length<33) return {f,lm:{pose:[],left:[],right:[]}};
@@ -312,17 +314,19 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
     const left=(res.leftHandLandmarks&&res.leftHandLandmarks[0])||null, right=(res.rightHandLandmarks&&res.rightHandLandmarks[0])||null;
     if(left&&left.length>=21){ left.forEach((p,k)=>{ f[27+k*3]=(X(p)-cx)/s; f[27+k*3+1]=(Y(p)-cy)/s; f[27+k*3+2]=(Z(p)-cz)/s; }); f[153]=1; }
     if(right&&right.length>=21){ right.forEach((p,k)=>{ f[90+k*3]=(X(p)-cx)/s; f[90+k*3+1]=(Y(p)-cy)/s; f[90+k*3+2]=(Z(p)-cz)/s; }); f[154]=1; }
+    const fa=new Array(39).fill(0); const face=(res.faceLandmarks&&res.faceLandmarks[0])||null;
+    if(face&&face.length>454){ FACE_IDX.forEach((fi,k)=>{ const p=face[fi]; fa[k*3]=(X(p)-cx)/s; fa[k*3+1]=(Y(p)-cy)/s; fa[k*3+2]=(Z(p)-cz)/s; }); }
     const pts=a=>a?a.map(p=>[p.x,p.y]):[];
-    return {f,lm:{pose:pts(pose),left:pts(left),right:pts(right)}};
+    return {f,fa,lm:{pose:pts(pose),left:pts(left),right:pts(right)}};
   }
   let lastTs=-1;
   function fastStep(){
     if(!fastMode||!landmarker||!ws||ws.readyState!==1||inflight||!video.videoWidth||video.readyState<2) return;
     let ts=performance.now(); if(ts-lastTs<30) return; lastTs=ts;  // ~30 fps, like the training videos
     const res=recoverHands(landmarker.detectForVideo(video,ts), video);
-    const {f,lm}=featuresFromResult(res);
+    const {f,fa,lm}=featuresFromResult(res);
     drawLandmarks(lm); lastLm=lm;
-    const msg={f:Array.from(f,v=>Math.round(v*10000)/10000),t:ts}; if(forceEnd){ msg.end=true; forceEnd=false; }
+    const msg={f:Array.from(f,v=>Math.round(v*10000)/10000),t:ts,fa:fa.map(v=>Math.round(v*10000)/10000)}; if(forceEnd){ msg.end=true; forceEnd=false; }
     inflight=true; ws.send(JSON.stringify(msg));
   }
   let lastLm={pose:[],left:[],right:[]};

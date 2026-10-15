@@ -266,7 +266,9 @@ class Segmenter:
         self.gap_ms, self.min_len, self.max_ms, self.rest_y = gap_ms, min_len, max_ms, rest_y
         self.still_ms, self.still_thr, self.min_sign_ms = still_ms, still_thr, min_sign_ms
         self.seg: list[np.ndarray] = []
+        self.faces: list[np.ndarray] = []
         self.times: list[float] = []
+        self.last_face: np.ndarray | None = None
         self.start_ms: float | None = None
         self.last_active_ms: float | None = None
         self.last: np.ndarray | None = None  # last completed sign
@@ -298,12 +300,16 @@ class Segmenter:
             return 0.0, start
         return self.times[-1] - self.times[start], start
 
-    def push(self, feat: np.ndarray, t_ms: float) -> np.ndarray | None:
+    def push(
+        self, feat: np.ndarray, t_ms: float, face: np.ndarray | None = None
+    ) -> np.ndarray | None:
         self.still_progress = 0.0
+        face = np.zeros((13, 3), np.float32) if face is None else face
         if is_active(feat, self.rest_y):
             if not self.seg:
                 self.start_ms = t_ms
             self.seg.append(feat)
+            self.faces.append(face)
             self.times.append(t_ms)
             self.last_active_ms = t_ms
             if self.start_ms is not None and t_ms - self.start_ms >= self.max_ms:
@@ -317,32 +323,37 @@ class Segmenter:
                     cut = next(
                         (i for i, t in enumerate(self.times) if t > keep_until), len(self.seg)
                     )
-                    self.seg, self.times = (
-                        self.seg[: max(cut, run_start + 1)],
-                        self.times[: max(cut, run_start + 1)],
+                    keep = max(cut, run_start + 1)
+                    self.seg, self.times, self.faces = (
+                        self.seg[:keep],
+                        self.times[:keep],
+                        self.faces[:keep],
                     )
                     return self.flush("hands still")
         elif self.seg:
             self.seg.append(feat)
+            self.faces.append(face)
             self.times.append(t_ms)
             if self.last_active_ms is not None and t_ms - self.last_active_ms >= self.gap_ms:
                 return self.flush("hands lowered")
         return None
 
     def flush(self, reason: str = "done pressed") -> np.ndarray | None:
-        seg, self.seg, self.times = self.seg, [], []
+        seg, faces, self.seg, self.times, self.faces = self.seg, self.faces, [], [], []
         self.last_active_ms, self.start_ms, self.still_progress = None, None, 0.0
         while seg and not is_active(seg[-1], self.rest_y):  # trim the lowering at the end
             seg.pop()
+            faces.pop()
         if len(seg) < self.min_len:
             return None
         self.end_reason = reason
         self.last = np.stack(seg)
+        self.last_face = np.stack(faces)
         return self.last
 
 
-def top3(pred, names, x) -> list[dict]:
-    p = pred.predict(x)
+def top3(pred, names, x, face=None) -> list[dict]:
+    p = pred.predict(x, face)
     return [{**names[i], "p": round(float(p[i]), 3)} for i in np.argsort(-p)[:3]]
 
 
@@ -350,7 +361,7 @@ WINDOW_MARGIN = 0.15  # a shorter window must beat the full sign by this much co
 
 
 def best_window(
-    pred, names, x: np.ndarray, margin: float | None = None
+    pred, names, x: np.ndarray, margin: float | None = None, face: np.ndarray | None = None
 ) -> tuple[list[dict], tuple[int, int]]:
     """Classify the sub-window of a completed sign that the model is most sure about.
 
@@ -360,18 +371,18 @@ def best_window(
     """
     n = len(x)
     if n < 16:
-        return top3(pred, names, x), (0, n)
+        return top3(pred, names, x, face), (0, n)
     min_len = max(12, int(n * 0.4))
     starts = sorted({int(v) for v in np.linspace(0, int(n * 0.45), 10)})
     ends = sorted({int(v) for v in np.linspace(int(n * 0.65), n, 7)})
     margin = WINDOW_MARGIN if margin is None else margin
-    full = pred.predict(x)
+    full = pred.predict(x, face)
     best, best_conf, span = full, float(full.max()) + margin, (0, n)
     for s0 in starts:
         for e0 in ends:
             if e0 - s0 < min_len:
                 continue
-            p = pred.predict(x[s0:e0])
+            p = pred.predict(x[s0:e0], None if face is None else face[s0:e0])
             if p.max() > best_conf:
                 best, best_conf, span = p, float(p.max()), (s0, e0)
     order = np.argsort(-best)[:3]
@@ -413,20 +424,30 @@ class Session:
         predictor()
         self.relay = relay
         self.buf: collections.deque = collections.deque(maxlen=STATE["window"])
+        self.fbuf: collections.deque = collections.deque(maxlen=STATE["window"])
         self.seg = Segmenter(gap_ms=gap_ms)
         self.frame_i = 0
         self.top: list[dict] = []
 
-    def step(self, feat: np.ndarray, t_ms: float, end: bool = False) -> dict:
+    def step(
+        self, feat: np.ndarray, t_ms: float, end: bool = False, face: np.ndarray | None = None
+    ) -> dict:
+        face = (
+            np.zeros((13, 3), np.float32)
+            if face is None
+            else np.asarray(face, np.float32).reshape(13, 3)
+        )
         self.buf.append(feat)
+        self.fbuf.append(face)
         self.frame_i += 1
         if self.frame_i % STATE["stride"] == 0 and len(self.buf) >= STATE["window"] // 2:
             x = np.stack(self.buf)
             ok = (x[:, -2] + x[:, -1] > 0).mean() > 0.5
-            self.top = top3(predictor(), STATE["labels"], x) if ok else []
+            f = np.stack(self.fbuf)
+            self.top = top3(predictor(), STATE["labels"], x, f) if ok else []
         if self.relay and RELAY["end"]:  # Done pressed on the laptop display
             RELAY["end"], end = False, True
-        done = self.seg.flush() if end else self.seg.push(feat, t_ms)
+        done = self.seg.flush() if end else self.seg.push(feat, t_ms, face)
         out = {
             "top": self.top,
             "hands": int(feat[-2] + feat[-1]),
@@ -434,7 +455,7 @@ class Session:
             "still": round(self.seg.still_progress, 2),
         }
         if done is not None:
-            final, span = best_window(predictor(), STATE["labels"], done)
+            final, span = best_window(predictor(), STATE["labels"], done, face=self.seg.last_face)
             out["final"] = final
             out["final_frames"] = int(span[1] - span[0])
             out["final_span"] = [int(span[0]), int(span[1]), int(len(done))]
@@ -475,7 +496,9 @@ async def ws_feat(websocket: WebSocket):
             if feat.shape != (155,):
                 feat = np.zeros(155, np.float32)
             t_ms = float(msg.get("t", time.time() * 1000))
-            out = await asyncio.to_thread(sess.step, feat, t_ms, bool(msg.get("end")))
+            fa = msg.get("fa")
+            face = np.asarray(fa, np.float32).reshape(13, 3) if fa and len(fa) == 39 else None
+            out = await asyncio.to_thread(sess.step, feat, t_ms, bool(msg.get("end")), face)
             out["ms"] = round((time.perf_counter() - t) * 1000, 1)
             await websocket.send_text(json.dumps(out))
             if relay and DISPLAYS:
@@ -516,7 +539,7 @@ async def ws(websocket: WebSocket):
                         if frame is None:
                             return None
                         feat = ex.process(frame, int((time.time() - t0) * 1000))
-                        res = sess.step(feat, time.time() * 1000)
+                        res = sess.step(feat, time.time() * 1000, False, ex.last_face)
                         res["lm"] = landmarks_payload(ex.last_result)
                         return res
 

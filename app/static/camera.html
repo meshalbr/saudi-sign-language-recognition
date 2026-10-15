@@ -55,6 +55,8 @@ let stream=null, facing='user', ws=null, inflight=false, landmarker=null, fast=f
 let fpsN=0, fpsT=performance.now(), lastPreview=0;
 const prev=document.createElement('canvas'), pctx=prev.getContext('2d');
 const POSE_IDX=[0,11,12,13,14,15,16,23,24];
+const FACE_IDX=[1,152,10,13,14,61,291,33,263,133,362,234,454];  // same as landmarks.FACE_IDX
+
 const HAND_EDGES=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 
 async function loadLandmarker(){
@@ -104,8 +106,10 @@ function feats(res){
   const L=res.leftHandLandmarks&&res.leftHandLandmarks[0], R=res.rightHandLandmarks&&res.rightHandLandmarks[0];
   if(L&&L.length>=21){L.forEach((p,k)=>{f[27+k*3]=(X(p)-cx)/s;f[28+k*3]=(Y(p)-cy)/s;f[29+k*3]=(Z(p)-cz)/s;}); f[153]=1;}
   if(R&&R.length>=21){R.forEach((p,k)=>{f[90+k*3]=(X(p)-cx)/s;f[91+k*3]=(Y(p)-cy)/s;f[92+k*3]=(Z(p)-cz)/s;}); f[154]=1;}
+  const fa=new Array(39).fill(0); const face=res.faceLandmarks&&res.faceLandmarks[0];
+  if(face&&face.length>454){ FACE_IDX.forEach((fi,k)=>{ const p=face[fi]; fa[k*3]=(X(p)-cx)/s; fa[k*3+1]=(Y(p)-cy)/s; fa[k*3+2]=(Z(p)-cz)/s; }); }
   const pts=a=>a?a.map(p=>[+p.x.toFixed(4),+p.y.toFixed(4)]):[];
-  return {f,lm:{pose:pts(pose).slice(0,25),left:pts(L),right:pts(R)}};
+  return {f,fa,lm:{pose:pts(pose).slice(0,25),left:pts(L),right:pts(R)}};
 }
 function draw(lm){
   const W=overlay.width=overlay.clientWidth,H=overlay.height=overlay.clientHeight; ctx.clearRect(0,0,W,H);
@@ -122,8 +126,8 @@ function step(){
   if(!ws||ws.readyState!==1||inflight||!video.videoWidth||video.readyState<2) return;
   if(fast){
     let ts=performance.now(); if(ts-lastTs<30) return; lastTs=ts;  // ~30 fps, like the training videos
-    const {f,lm}=feats(recoverHands(landmarker.detectForVideo(video,ts), video)); draw(lm);
-    const msg={f:Array.from(f,v=>Math.round(v*10000)/10000),t:ts,lm}; if(forceEnd){msg.end=true; forceEnd=false;}
+    const {f,fa,lm}=feats(recoverHands(landmarker.detectForVideo(video,ts), video)); draw(lm);
+    const msg={f:Array.from(f,v=>Math.round(v*10000)/10000),t:ts,lm,fa:fa.map(v=>Math.round(v*10000)/10000)}; if(forceEnd){msg.end=true; forceEnd=false;}
     inflight=true; ws.send(JSON.stringify(msg)); sendPreview();
   }else{
     if(forceEnd){ forceEnd=false; ws.send(JSON.stringify({end:true})); }

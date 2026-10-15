@@ -57,10 +57,17 @@ class Predictor:
             self.seq_len = int(ckpt["cfg"].get("seq_len", 32))
             self._torch = torch
 
-    def predict(self, x: np.ndarray) -> np.ndarray:
+    def predict(self, x: np.ndarray, face: np.ndarray | None = None) -> np.ndarray:
         """x: (T, D) -> softmax probabilities over labels."""
-        x = preprocess(x, self.cfg)
-        x = transform(resample(x, self.seq_len), self.cfg)[None]
+        if (self.cfg.get("features") or {}).get("face"):
+            if face is None:
+                face = np.zeros((len(x), 13, 3), np.float32)
+            x, face = preprocess(x, self.cfg, np.asarray(face, np.float32).reshape(len(x), 13, 3))
+            f_rs = resample(face.reshape(len(face), -1), self.seq_len)
+            x = transform(resample(x, self.seq_len), self.cfg, f_rs)[None]
+        else:
+            x = preprocess(x, self.cfg)
+            x = transform(resample(x, self.seq_len), self.cfg)[None]
         if self.use_onnx:
             logits = self.sess.run(None, {self.input_name: x})[0][0]
         else:

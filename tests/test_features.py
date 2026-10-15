@@ -120,3 +120,53 @@ def test_smooth_keeps_absent_hands_zero_and_reduces_jitter():
     y = smooth(x, 3)
     assert y[:, LEFT_SLICE].std(axis=0).mean() < x[:, LEFT_SLICE].std(axis=0).mean()
     assert not y[:, RIGHT_SLICE].any()
+
+
+def test_face_block_measures_hand_position_relative_to_nose_and_chin():
+    from ssl_recognition.features import FACE_DIM, feature_dim, transform
+    from ssl_recognition.landmarks import N_FACE
+
+    x = _clip(t=10)  # left hand present
+    blk = x[:, LEFT_SLICE].reshape(10, 21, 3)
+    blk[:] = 0.0
+    blk[:, 0, :2] = [0.1, -0.5]  # wrist just under the chin
+    x[:, LEFT_SLICE] = blk.reshape(10, -1)
+    face = np.zeros((10, N_FACE, 3), np.float32)
+    face[:, 0, :2] = [0.0, -1.3]  # nose
+    face[:, 1, :2] = [0.0, -0.7]  # chin
+    cfg = {"features": {"face": True}}
+    y = transform(x, cfg, face.reshape(10, -1))
+    assert y.shape == (10, feature_dim(cfg)) and FACE_DIM == N_FACE * 3 + 24
+    rel = y[:, -FACE_DIM + N_FACE * 3 :]
+    # left hand, wrist relative to the nose then to the chin
+    assert np.allclose(rel[0, 0:2], [0.1, 0.8], atol=1e-5)
+    assert np.allclose(rel[0, 6:8], [0.1, 0.2], atol=1e-5)
+    assert not rel[:, 12:].any()  # right hand absent
+
+
+def test_mirror_face_is_an_involution():
+    from ssl_recognition.landmarks import N_FACE, mirror_face
+
+    f = np.random.RandomState(5).rand(7, N_FACE, 3).astype(np.float32)
+    assert np.allclose(mirror_face(mirror_face(f)), f)
+
+
+def test_dataset_carries_face_points_through_augmentation(tmp_path):
+    from ssl_recognition.data import ClipDataset, load_dataset, save_clip
+    from ssl_recognition.features import feature_dim
+    from ssl_recognition.landmarks import N_FACE
+
+    x = _clip(t=30)
+    face = np.random.RandomState(1).rand(30, N_FACE, 3).astype(np.float32)
+    save_clip(tmp_path / "0071" / "s01_000.npz", x, "0071", "s01", 30.0, face=face)
+    clips = load_dataset(tmp_path)
+    assert clips[0].face is not None and clips[0].face.shape == (30, N_FACE, 3)
+    cfg = {
+        "features": {"face": True, "hand_local": True, "velocity": True, "trajectory": True},
+        "fill_gaps": 8,
+        "preprocess": {"smooth": 3, "motion_trim": 0.01},
+        "hand_shift": 0.2,
+    }
+    ds = ClipDataset(clips, {"0071": 0}, 32, train=True, cfg=cfg)
+    xt, label = ds[0]
+    assert tuple(xt.shape) == (32, feature_dim(cfg)) and label == 0

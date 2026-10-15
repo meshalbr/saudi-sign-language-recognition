@@ -24,6 +24,7 @@ from .landmarks import (
     LEFT_SLICE,
     RIGHT_FLAG,
     RIGHT_SLICE,
+    mirror_face,
     mirror_features,
 )
 
@@ -34,6 +35,7 @@ class Clip:
     label: str
     signer: str
     path: Path
+    face: np.ndarray | None = None
 
 
 def save_clip(
@@ -49,7 +51,8 @@ def save_clip(
 
 def load_clip(path: Path) -> Clip:
     with np.load(path, allow_pickle=False) as z:
-        return Clip(x=z["x"], label=str(z["label"]), signer=str(z["signer"]), path=path)
+        face = z["face"] if "face" in z.files else None
+        return Clip(x=z["x"], label=str(z["label"]), signer=str(z["signer"]), path=path, face=face)
 
 
 def load_dataset(root: Path) -> list[Clip]:
@@ -75,14 +78,21 @@ def resample(x: np.ndarray, seq_len: int) -> np.ndarray:
 
 
 def augment(
-    x: np.ndarray, rng: random.Random, hand_drop: float = 0.0, hand_shift: float = 0.0
-) -> np.ndarray:
+    x: np.ndarray,
+    rng: random.Random,
+    hand_drop: float = 0.0,
+    hand_shift: float = 0.0,
+    face: np.ndarray | None = None,
+):
     """Random mirror, time-scale, scale, shift, jitter, optional hand-block dropout and an
     optional independent shift of each hand (so exact position in front of the body matters
     less than the movement)."""
     y = x
+    f = face
     if rng.random() < 0.5:
         y = mirror_features(y)
+        if f is not None:
+            f = mirror_face(f)
     if hand_drop > 0 and rng.random() < hand_drop:
         # Simulate a missed hand: zero one hand block and its presence flag for the clip.
         y = y.copy()
@@ -94,12 +104,18 @@ def augment(
     keep = max(4, int(t * rng.uniform(0.7, 1.0)))
     start = rng.randint(0, t - keep)
     y = y[start : start + keep]
+    if f is not None:
+        f = f[start : start + keep]
     x_pose_present = np.abs(y[:, :27]).sum(axis=1) > 0
     # Spatial scale and shift on coordinate blocks (not on the two presence flags).
     coords = y[:, : FEATURE_DIM - 2]
     scale = rng.uniform(0.9, 1.1)
     shift = np.array([rng.uniform(-0.1, 0.1), rng.uniform(-0.1, 0.1), 0.0], dtype=np.float32)
     coords = coords.reshape(len(y), -1, 3) * scale + shift
+    if f is not None:  # the face moves with the body
+        face_present = np.abs(f).sum(axis=(1, 2)) > 0
+        f = f * scale + shift
+        f[~face_present] = 0.0
     coords = (
         coords + rng.gauss(0, 1) * 0.0 + np.random.normal(0, 0.01, coords.shape).astype(np.float32)
     )
@@ -118,6 +134,8 @@ def augment(
     y[y[:, LEFT_FLAG] <= 0, LEFT_SLICE] = 0.0
     y[y[:, RIGHT_FLAG] <= 0, RIGHT_SLICE] = 0.0
     y[~x_pose_present, :27] = 0.0
+    if f is not None:
+        return y.astype(np.float32), f.astype(np.float32)
     return y.astype(np.float32)
 
 
@@ -209,8 +227,19 @@ class ClipDataset:
         from .features import preprocess, transform
 
         c = self.clips[i]
-        x = preprocess(c.x, self.cfg)
+        use_face = bool((self.cfg.get("features") or {}).get("face"))
+        face = None
+        if use_face:
+            face = c.face if c.face is not None else np.zeros((len(c.x), 13, 3), np.float32)
+            x, face = preprocess(c.x, self.cfg, face)
+        else:
+            x = preprocess(c.x, self.cfg)
         if self.train:
-            x = augment(x, self.rng, self.hand_drop, float(self.cfg.get("hand_shift", 0.0)))
-        x = transform(resample(x, self.seq_len), self.cfg)
+            shift = float(self.cfg.get("hand_shift", 0.0))
+            if use_face:
+                x, face = augment(x, self.rng, self.hand_drop, shift, face=face)
+            else:
+                x = augment(x, self.rng, self.hand_drop, shift)
+        f_rs = None if face is None else resample(face.reshape(len(face), -1), self.seq_len)
+        x = transform(resample(x, self.seq_len), self.cfg, f_rs)
         return torch.from_numpy(x), self.label_map[c.label]
