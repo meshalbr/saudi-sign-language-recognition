@@ -107,3 +107,44 @@ to 8 frames, in training, inference and the reference display.
 Reading: the overall mean barely moves, but the cleanup does what it targets, +2.7 points on
 the badly tracked signs with no cost elsewhere. Deployment model `final_v2` (all signers,
 official split): 0.997 top-1.
+
+
+## Hand recovery, motion focus and face features (2026-10-15 to 2026-10-16)
+
+All 15,117 clips re-extracted into `data/landmarks_v3` with wrist-crop hand recovery (a hand that
+Holistic loses flat on the chest is found again by HandLandmarker in a crop around the pose
+wrist) and 13 face points per frame. 759 min in gentle mode, 0 failures. Three recipes, each on the
+three leave-one-signer-out folds; clips with hand coverage below 0.6 are dropped from training.
+
+| Recipe | s01 | s02 | s03 | mean top-1 | mean top-5 | min per fold |
+|---|---|---|---|---|---|---|
+| base (phase-2 features + trajectory, new data) | 0.841 | 0.845 | 0.830 | 0.839 | 0.966 | 29 |
+| motion (smoothing + trim still frames + hand-shift augmentation) | 0.866 | 0.810 | 0.849 | 0.842 | 0.963 | 56 |
+| **face** (motion recipe + face points + hand-to-nose/chin) | **0.889** | 0.831 | **0.854** | **0.858** | **0.972** | 53 |
+
+Held-out accuracy on the signs users reported, pooled over the three folds (150 clips each):
+
+| Sign | base | motion | face | most common error (face) |
+|---|---|---|---|---|
+| 0071 Skeleton | 0.913 | 0.907 | **0.940** | 0169 (4) |
+| 0072 Skull | 0.980 | **1.000** | 0.987 | 0071 (2) |
+| 0075 Respiratory device | 0.767 | 0.793 | **0.847** | 0076 (14) |
+| 0076 Trachea | 0.713 | 0.573 | **0.720** | 0081 pharynx (34) |
+
+Hand raised from the lap (`scripts/sim_raise.py`, 200 official-split test clips, exactly one
+correct final answer; signers seen in training, so optimistic):
+
+| Model | clean | raised |
+|---|---|---|
+| final_v2 (previous app model) | 91.5% | 89.5% |
+| final_v3_base | 96.0% | 96.0% |
+| final_v3_motion | 96.0% | 93.5% |
+| **final_v3_face** | **96.5%** | 95.5% |
+
+Reading: motion focus alone is a wash (+0.3 mean, swings of -3.5 to +2.5 per fold) and hurts
+trachea badly (0.573), because trachea and respiratory device share the movement and differ only
+in where it starts (throat vs nose). Adding the face gives the model that reference point:
++1.9 points overall, respiratory device +8, and trachea is no longer confused with respiratory
+device (its main error is now pharynx, which is signed at the same place). Trachea stays the
+weakest of the four at 72%. Deployment model `final_v3_face` (all signers, official split):
+0.997 top-1, 67 min CPU, ONNX 2.03 MB.

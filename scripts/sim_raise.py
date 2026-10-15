@@ -38,25 +38,40 @@ def with_raise(x: np.ndarray, n_up: int = 15, n_down: int = 15, hold: int = 25) 
     return np.stack(up + list(x) + down + rest)
 
 
-def run(n: int = 200, seed: int = 1, run_dir: str = "runs/final_v2") -> None:
+def pad_face(face: np.ndarray, n_before: int, n_after: int) -> np.ndarray:
+    """Face points for the added frames: the head stays where it was at the start / end."""
+    face = face.reshape(len(face), 13, 3)
+    return np.concatenate(
+        [np.repeat(face[:1], n_before, 0), face, np.repeat(face[-1:], n_after, 0)]
+    )
+
+
+def run(
+    n: int = 200,
+    seed: int = 1,
+    run_dir: str = "runs/final_v3_face",
+    data: str = "data/landmarks_v3",
+) -> None:
     from app import server
 
     server.STATE.update(run=run_dir, names="data/karsl_labels.json", window=40, stride=1)
     server.STATE.pop("predictor", None)
     rng = random.Random(seed)
-    files = rng.sample(sorted(glob.glob("data/landmarks/*/*_test_*.npz")), n)
+    files = rng.sample(sorted(glob.glob(f"{data}/*/*_test_*.npz")), n)
     stats = {"clean": [0, 0], "raised": [0, 0]}
     for f in files:
-        x = np.load(f)["x"]
+        z = np.load(f)
+        x = z["x"]
+        face = z["face"] if "face" in z.files else np.zeros((len(x), 13, 3), np.float32)
         y = f.replace("\\", "/").split("/")[-2]
-        for name, seq in (
-            ("clean", np.concatenate([x, [shifted(x[-1], 3)] * 25])),
-            ("raised", with_raise(x)),
+        for name, seq, fseq in (
+            ("clean", np.concatenate([x, [shifted(x[-1], 3)] * 25]), pad_face(face, 0, 25)),
+            ("raised", with_raise(x), pad_face(face, 15, 40)),
         ):
             s = server.Session()
             fin = []
             for k, row in enumerate(seq):
-                o = s.step(row, k * 33.3)
+                o = s.step(row, k * 33.3, False, fseq[k])
                 if "final" in o:
                     fin.append(o["final"][0]["id"])
             stats[name][0] += len(fin) == 1
@@ -66,4 +81,11 @@ def run(n: int = 200, seed: int = 1, run_dir: str = "runs/final_v2") -> None:
 
 
 if __name__ == "__main__":
-    run()
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--run", default="runs/final_v3_face")
+    ap.add_argument("--data", default="data/landmarks_v3")
+    ap.add_argument("-n", type=int, default=200)
+    a = ap.parse_args()
+    run(n=a.n, run_dir=a.run, data=a.data)

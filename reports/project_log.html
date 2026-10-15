@@ -71,28 +71,28 @@ footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);paddin
 
 <main>
 <header id="overview">
-  <p class="meta">Portfolio project 1 · Meshal AlRubaie · github.com/meshalbr/saudi-sign-language-recognition · log started 12 Oct 2026, last updated 14 Oct 2026, 23:40</p>
+  <p class="meta">Portfolio project 1 · Meshal AlRubaie · github.com/meshalbr/saudi-sign-language-recognition · log started 12 Oct 2026, last updated 16 Oct 2026, 03:30</p>
   <h1>Saudi Sign Language Recognition: Project Log</h1>
   <p>A system that recognises Saudi / Arabic sign language words from an ordinary camera, laptop or phone, in real time, on a laptop with no graphics card. MediaPipe turns each video frame into body and hand landmark points, and a small Transformer reads the movement of those points over time and names the sign in Arabic and English. This page records what was built, every problem met, how each was fixed, and the measured evidence.</p>
   <div class="kpis">
     <div class="kpi"><b>100</b><span>signs (KArSL-100)</span></div>
     <div class="kpi"><b>15,117</b><span>training videos, 3 signers</span></div>
-    <div class="kpi"><b>83.7%</b><span>top-1 on a signer never seen (published best: 68.2%)</span></div>
+    <div class="kpi"><b>85.8%</b><span>top-1 on a signer never seen (published best: 68.2%)</span></div>
     <div class="kpi"><b>99.7%</b><span>top-1 on the official test split</span></div>
-    <div class="kpi"><b>~25 min</b><span>training time per model, laptop CPU</span></div>
+    <div class="kpi"><b>~55 min</b><span>training time per model, laptop CPU</span></div>
   </div>
 </header>
 
 <section id="status">
   <h2>Current status</h2>
-  <div class="note"><b>Running now (14–15 Oct):</b> all 15,117 videos are being re-extracted with the new hand-recovery step and face points (about 16–17 hours at 15 videos per minute with 3 worker processes; interrupted when a session ended after 858 clips, resumed 15 Oct 01:30, switched to gentle mode at 03:05 to keep the laptop cool: 2 workers, low priority, 4 of 8 logical CPUs, about 18 clips per minute; expected to finish about 2 PM on 15 Oct, results about 7 PM). When that finishes, two model versions train automatically on the three signer-held-out tests plus a final app model each: <i>recovery only</i> and <i>recovery + movement focus</i>. The better one replaces the app model. Results will be added to this page.</div>
+  <div class="note"><b>16 Oct:</b> re-extraction and all three comparisons finished. The face-points version won (85.8% on unseen signers, from 83.7%) and is now the app model (<code>runs/final_v3_face</code>). Nothing is running in the background.</div>
   <div class="scroll"><table>
     <tr><th>Part</th><th>State</th></tr>
     <tr><td>Recognition pipeline, training, evaluation</td><td>Done <span class="tag done">done</span></td></tr>
     <tr><td>Browser app (laptop + phone camera, practice, word list, teach mode)</td><td>Done <span class="tag done">done</span></td></tr>
-    <tr><td>Fix for signs where the hand lies on the chest (trachea, respiratory device)</td><td>Code done; re-extraction and retraining running <span class="tag run">running</span></td></tr>
-    <tr><td>Movement-focused model (trimming, smoothing, trajectory features)</td><td>Code done; comparison training queued <span class="tag run">queued</span></td></tr>
-    <tr><td>Face points as features (hand position relative to nose and chin, head tilt)</td><td>Code done in training, inference, server and both pages; third comparison queued after the first two <span class="tag run">queued</span></td></tr>
+    <tr><td>Fix for signs where the hand lies on the chest (trachea, respiratory device)</td><td>Done; trachea 64% → 72%, respiratory device 77% → 85% <span class="tag done">done</span></td></tr>
+    <tr><td>Movement-focused model (trimming, smoothing, trajectory features)</td><td>Tested; no gain on its own and worse on trachea, kept only as part of the face version <span class="tag done">done</span></td></tr>
+    <tr><td>Face points as features (hand position relative to nose and chin, head tilt)</td><td>Done; best version, now in the app <span class="tag done">done</span></td></tr>
     <tr><td>Gentle mode (low priority, 4 of 8 logical CPUs) so the laptop stays cool</td><td>Active <span class="tag done">done</span></td></tr>
     <tr><td>Automated tests</td><td>33 passing; GitHub checks green</td></tr>
   </table></div>
@@ -194,11 +194,12 @@ footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);paddin
     <tr><td>Landmark extraction, signer 01</td><td>5,006 videos, 3 workers</td><td class="n">183 min</td></tr>
     <tr><td>Landmark extraction, signers 02 + 03</td><td>10,111 videos, 3 workers</td><td class="n">358 min</td></tr>
     <tr><td>Re-extraction of 15 weak signs, full resolution</td><td>2,270 videos</td><td class="n">100 min</td></tr>
-    <tr><td>Re-extraction of all clips with hand recovery + face</td><td>15,117 videos</td><td class="n">about 16–17 h (running)</td></tr>
+    <tr><td>Re-extraction of all clips with hand recovery + face</td><td>15,117 videos</td><td class="n">759 min (gentle mode, 0 failures)</td></tr>
     <tr><td>GRU, one signer, official split</td><td>3,606 train clips</td><td class="n">37 min</td></tr>
     <tr><td>GRU, leave-one-signer-out (per fold)</td><td>about 8,600 train clips</td><td class="n">26–28 min</td></tr>
     <tr><td>Transformer, leave-one-signer-out (per fold)</td><td>about 8,600 train clips</td><td class="n">24–26 min</td></tr>
     <tr><td>Transformer, deployment model (all signers)</td><td>10,814 train clips</td><td class="n">31–33 min</td></tr>
+    <tr><td>Transformer + face features, per fold / deployment model</td><td>about 8,600 / 10,800 train clips, gentle mode</td><td class="n">53 min / 67 min</td></tr>
     <tr><td>Teach mode fine-tune (4 epochs)</td><td>2,500 KArSL + user clips</td><td class="n">about 3 min</td></tr>
   </table></div>
 </section>
@@ -213,19 +214,22 @@ footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);paddin
     <tr><td>+ stronger regularisation, validation-loss tie-break</td><td class="n">77.8%</td><td class="n">94.6%</td><td class="up">+1.5</td></tr>
     <tr><td>Transformer instead of GRU</td><td class="n">83.3%</td><td class="n">96.0%</td><td class="up">+5.5</td></tr>
     <tr><td>+ cleaned landmarks for weak signs, gap filling</td><td class="n">83.7%</td><td class="n">95.9%</td><td class="up">+0.4</td></tr>
-    <tr><td>+ hand recovery, movement focus</td><td colspan="3">training overnight</td></tr>
+    <tr><td>+ all clips re-extracted with hand recovery</td><td class="n">83.9%</td><td class="n">96.6%</td><td class="up">+0.2</td></tr>
+    <tr><td>+ movement focus (smoothing, still-frame trimming, hand shifts)</td><td class="n">84.2%</td><td class="n">96.3%</td><td class="up">+0.3</td></tr>
+    <tr><td>+ face points, hand position relative to nose and chin</td><td class="n"><b>85.8%</b></td><td class="n"><b>97.2%</b></td><td class="up">+1.6</td></tr>
   </table></div>
   <p>For comparison, the best peer-reviewed signer-independent result on KArSL-100 is 68.2% (Transformer with hand and face keypoints, ACM TALLIP 2024).</p>
   <h3>Other measurements</h3>
   <div class="scroll"><table>
     <tr><th>Measurement</th><th>Result</th></tr>
-    <tr><td>Official KArSL split, all 3 signers</td><td class="n">99.7% top-1 (2,400 test clips)</td></tr>
+    <tr><td>Official KArSL split, all 3 signers</td><td class="n">99.7% top-1 (2,400 test clips, face model)</td></tr>
     <tr><td>The 15 badly tracked signs, after cleanup</td><td class="n">82.6% → 85.3%</td></tr>
     <tr><td>Mirrored camera (unseen signer)</td><td class="n">82.2% vs 81.2% normal: mirroring does not hurt</td></tr>
     <tr><td>Camera shape before the aspect fix (unseen signer)</td><td class="n">16:9 83% · 4:3 78.5% · upright phone 40.3%; now equal</td></tr>
-    <tr><td>Hand raised from the lap before the sign (simulated)</td><td class="n">60.5% → 68.5% unseen signer with window search</td></tr>
-    <tr><td>Trachea (0076), unseen signer</td><td class="n">64%, mostly confused with respiratory device (0075)</td></tr>
-    <tr><td>Skeleton (0071), unseen signer</td><td class="n">98%</td></tr>
+    <tr><td>Hand raised from the lap before the sign (simulated)</td><td class="n">60.5% → 68.5% unseen signer with window search; app model on known signers 89.5% → 95.5%</td></tr>
+    <tr><td>Trachea (0076), unseen signer</td><td class="n">64% → 72%; no longer read as respiratory device, main error now pharynx (signed at the same place)</td></tr>
+    <tr><td>Respiratory device (0075), unseen signer</td><td class="n">77% → 85%</td></tr>
+    <tr><td>Skeleton (0071) / skull (0072), unseen signer</td><td class="n">94% / 99% (face model, all three folds pooled)</td></tr>
     <tr><td>Speed on the laptop</td><td class="n">MediaPipe 48–71 ms per frame; classifier 1.6 ms (ONNX)</td></tr>
   </table></div>
 </section>
@@ -303,11 +307,11 @@ footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);paddin
     <dt>Fix</dt><dd>Holding the hands still for 1 s finishes the sign; a bar shows progress. Phone camera gets a lens picker and a wide-angle button.</dd>
     <dt>Evidence</dt><dd>On KArSL, a 1 s hold would end about 2% of signs early (a 0.5 s hold: 10–16%).</dd></dl></div>
 
-  <div class="issue"><h3>14. Trachea read wrong; hand points wrong on the chest <span class="tag run">fix training</span></h3><dl>
+  <div class="issue"><h3>14. Trachea read wrong; hand points wrong on the chest <span class="tag done">improved</span></h3><dl>
     <dt>Problem</dt><dd>Trachea 64% on unseen signers, mostly read as respiratory device.</dd>
     <dt>Cause</dt><dd>MediaPipe Holistic loses a hand lying flat on the chest (against a striped shirt it lost 32 of 50 frames). Both signs end on the chest, so the model had almost no hand data to separate them.</dd>
     <dt>Fix</dt><dd>When a raised hand is lost, run MediaPipe's dedicated hand model on a crop around the wrist. Same step in the live app. All clips re-extracted overnight.</dd>
-    <dt>Evidence so far</dt><dd>Signing-hand coverage on these signs 68% → 97% (worst clip 42% → 96%). Accuracy after retraining: pending.</dd></dl></div>
+    <dt>Evidence so far</dt><dd>Signing-hand coverage on these signs 68% → 97% (worst clip 42% → 96%). After retraining with face points: trachea 64% → 72%, respiratory device 77% → 85%; respiratory device is still read as trachea 14 times out of 150, but trachea is now rarely read as respiratory device (at most 3 times; its main error is pharynx).</dd></dl></div>
 
   <div class="issue"><h3>16. Laptop running hot during the long extraction <span class="tag done">fixed</span></h3><dl>
     <dt>Problem</dt><dd>Three extraction workers kept the CPU boosting at about 130–140% of its base speed for hours.</dd>
@@ -318,8 +322,9 @@ footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);paddin
     <dt>Problem</dt><dd>209 of 858 saved clips were unreadable after the previous session closed.</dd>
     <dt>Fix</dt><dd>Clips are written to a temporary file and renamed only when complete; broken files were removed and re-extracted.</dd></dl></div>
 
-  <div class="issue"><h3>15. Model relied on where the hand starts and ends <span class="tag run">fix training</span></h3><dl>
-    <dt>Fix</dt><dd>Smoothing, trimming still frames, movement-trajectory features relative to each hand's own position, random hand shifts in training, and dropping badly tracked clips. Compared against recovery-only overnight.</dd>
+  <div class="issue"><h3>15. Model relied on where the hand starts and ends <span class="tag done">tested</span></h3><dl>
+    <dt>Fix</dt><dd>Smoothing, trimming still frames, movement-trajectory features relative to each hand's own position, random hand shifts in training, and dropping badly tracked clips. Compared against recovery-only on all three folds.</dd>
+    <dt>Result</dt><dd>84.2% vs 83.9%: no real gain, and trachea fell to 57% because it is told apart from respiratory device only by where it starts. Adding face points as a reference fixed that (85.8%, trachea 72%).</dd>
     <dt>Limit</dt><dd>Trachea and respiratory device differ only in the starting place, so location cannot be ignored completely.</dd></dl></div>
 </section>
 
@@ -327,8 +332,8 @@ footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);paddin
   <h2>Next steps</h2>
   <div class="scroll"><table>
     <tr><th>Step</th><th>Why</th></tr>
-    <tr><td>Compare overnight results; switch the app to the better model</td><td>Measure trachea, respiratory device, overall and the raise test</td></tr>
-    <tr><td>Compare the face-points version (queued)</td><td>Published work reports about +4%; trachea and respiratory device differ by position relative to the face</td></tr>
+    <tr><td>Try the face model live on the hard words</td><td>Simulations use KArSL signers; the real test is a new person on a webcam</td></tr>
+    <tr><td>Trachea vs pharynx</td><td>Same place on the throat; still the weakest of the reported signs at 72%</td></tr>
     <tr><td>Record own examples in teach mode for the hardest words</td><td>Adapts the model to the user's signing</td></tr>
     <tr><td>Pre-train on Google ASL Signs or Isharah</td><td>More signers, better generalisation</td></tr>
     <tr><td>Scale to all 502 KArSL signs</td><td>Larger vocabulary</td></tr>

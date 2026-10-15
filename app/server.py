@@ -603,7 +603,7 @@ def personalise_start():
 
     base = Path(STATE.get("base_run") or STATE["run"])
     if "personal" in str(base):
-        base = Path("runs/final_v2")
+        base = Path("runs/final_v3_face")
     STATE["base_run"] = str(base)
 
     def swap(run: Path):
@@ -705,7 +705,7 @@ def main() -> None:
     import uvicorn
 
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--run", default="runs/final_v2")
+    ap.add_argument("--run", default="runs/final_v3_face")
     ap.add_argument("--names", default="data/karsl_labels.json")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--http-port", type=int, default=8000)
