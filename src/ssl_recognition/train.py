@@ -134,6 +134,9 @@ def train(cfg: dict, test_signer: str | None = None) -> dict:
 
 
 def main() -> None:
+    from .gentle import be_gentle
+
+    be_gentle()
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", default="configs/baseline.yaml")
     ap.add_argument("--test-signer", default=None, help="hold out one signer as the test set")

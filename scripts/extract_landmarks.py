@@ -59,6 +59,9 @@ def _signer_of(v: Path, fixed: str | None, from_name: bool) -> str:
 def _worker(job: tuple) -> tuple[int, int, int, list[str]]:
     """Process one chunk of videos with its own extractor. Returns (done, skipped, failed, errs)."""
     videos, out, signer, from_name, max_frames, width, overwrite, wid, min_conf = job
+    from ssl_recognition.gentle import be_gentle
+
+    be_gentle()
     done = skipped = failed = 0
     errs: list[str] = []
     t0 = time.time()
