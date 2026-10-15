@@ -92,7 +92,9 @@ footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);paddin
     <tr><td>Browser app (laptop + phone camera, practice, word list, teach mode)</td><td>Done <span class="tag done">done</span></td></tr>
     <tr><td>Fix for signs where the hand lies on the chest (trachea, respiratory device)</td><td>Code done; re-extraction and retraining running <span class="tag run">running</span></td></tr>
     <tr><td>Movement-focused model (trimming, smoothing, trajectory features)</td><td>Code done; comparison training queued <span class="tag run">queued</span></td></tr>
-    <tr><td>Automated tests</td><td>30 passing; GitHub checks green</td></tr>
+    <tr><td>Face points as features (hand position relative to nose and chin, head tilt)</td><td>Code done in training, inference, server and both pages; third comparison queued after the first two <span class="tag run">queued</span></td></tr>
+    <tr><td>Gentle mode (low priority, 4 of 8 logical CPUs) so the laptop stays cool</td><td>Active <span class="tag done">done</span></td></tr>
+    <tr><td>Automated tests</td><td>33 passing; GitHub checks green</td></tr>
   </table></div>
 </section>
 
@@ -307,6 +309,15 @@ footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);paddin
     <dt>Fix</dt><dd>When a raised hand is lost, run MediaPipe's dedicated hand model on a crop around the wrist. Same step in the live app. All clips re-extracted overnight.</dd>
     <dt>Evidence so far</dt><dd>Signing-hand coverage on these signs 68% → 97% (worst clip 42% → 96%). Accuracy after retraining: pending.</dd></dl></div>
 
+  <div class="issue"><h3>16. Laptop running hot during the long extraction <span class="tag done">fixed</span></h3><dl>
+    <dt>Problem</dt><dd>Three extraction workers kept the CPU boosting at about 130–140% of its base speed for hours.</dd>
+    <dt>Fix</dt><dd>Gentle mode: 2 workers, below-normal priority, limited to 4 of the 8 logical CPUs, capped training threads. An earlier version silently failed because the Windows call needed 64-bit handle types; fixed and verified.</dd>
+    <dt>Evidence</dt><dd>The workers now use exactly 4 logical CPUs; throughput 18 clips per minute, slightly faster than before because the workers no longer compete.</dd></dl></div>
+
+  <div class="issue"><h3>17. Session ended mid-extraction and left broken files <span class="tag done">fixed</span></h3><dl>
+    <dt>Problem</dt><dd>209 of 858 saved clips were unreadable after the previous session closed.</dd>
+    <dt>Fix</dt><dd>Clips are written to a temporary file and renamed only when complete; broken files were removed and re-extracted.</dd></dl></div>
+
   <div class="issue"><h3>15. Model relied on where the hand starts and ends <span class="tag run">fix training</span></h3><dl>
     <dt>Fix</dt><dd>Smoothing, trimming still frames, movement-trajectory features relative to each hand's own position, random hand shifts in training, and dropping badly tracked clips. Compared against recovery-only overnight.</dd>
     <dt>Limit</dt><dd>Trachea and respiratory device differ only in the starting place, so location cannot be ignored completely.</dd></dl></div>
@@ -317,7 +328,7 @@ footer{color:var(--muted);font-size:13px;border-top:1px solid var(--line);paddin
   <div class="scroll"><table>
     <tr><th>Step</th><th>Why</th></tr>
     <tr><td>Compare overnight results; switch the app to the better model</td><td>Measure trachea, respiratory device, overall and the raise test</td></tr>
-    <tr><td>Use the saved face points as features</td><td>Published work reports about +4%; the weak signs are near the face</td></tr>
+    <tr><td>Compare the face-points version (queued)</td><td>Published work reports about +4%; trachea and respiratory device differ by position relative to the face</td></tr>
     <tr><td>Record own examples in teach mode for the hardest words</td><td>Adapts the model to the user's signing</td></tr>
     <tr><td>Pre-train on Google ASL Signs or Isharah</td><td>More signers, better generalisation</td></tr>
     <tr><td>Scale to all 502 KArSL signs</td><td>Larger vocabulary</td></tr>
