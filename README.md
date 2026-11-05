@@ -3,16 +3,17 @@
 Real-time recognition of Saudi Sign Language signs from an ordinary webcam, running on a
 low-end laptop with no graphics card.
 
-The camera never reaches the neural network. MediaPipe Holistic turns each frame into 155
-body-normalised landmark numbers, and a small bidirectional GRU classifies the sequence of
-frames into a sign. That keeps the training data tiny, inference fast on a CPU, and the
-signer's face out of the pipeline.
+The camera never reaches the neural network. MediaPipe turns each frame into body-normalised
+landmark numbers (upper body, both hands and 13 face points), and a small Transformer
+encoder classifies the sequence of frames into a sign. That keeps the training data tiny,
+inference fast on a CPU, and no video of the signer is stored or sent anywhere.
 
-> Status: day 2. Pipeline, recorder, trainer, ONNX export and live demo are in place and
-> tested (11 tests, CI green). On KArSL-100 (100 signs, 3 signers, 15,117 clips) the
-> models reach **99.6% top-1** on the official split and **83.3% top-1 / 96.0% top-5
-> leave-one-signer-out** (a 450k-parameter Transformer; up from 67.0% with the first GRU
-> baseline), all trained on the laptop CPU.
+> Status: on KArSL-100 (100 signs, 3 signers, 15,117 clips) the model reaches **85.8% top-1 /
+> 97.2% top-5 on a signer it has never seen** (leave-one-signer-out, mean of 3 folds; the
+> published signer-independent result on the same benchmark is 68.2%) and 99.7% on the
+> official split. It is a 2 MB ONNX model that runs in under 2 ms on a laptop CPU, all
+> trained on that laptop. A browser app recognises signs live from the laptop webcam or a
+> phone camera.
 
 ## Why this matters
 
@@ -36,7 +37,7 @@ The long-term goal is continuous recognition of whole signed sentences on a phon
 ```
 webcam / video  ->  MediaPipe Holistic (pose + hands)  ->  155 numbers per frame
                 ->  normalise to the shoulders        ->  resample to 32 frames
-                ->  BiGRU classifier                  ->  sign + confidence
+                ->  Transformer classifier            ->  sign + confidence
 ```
 
 1. **Landmarks.** MediaPipe finds 33 body points and 21 points per hand in every frame. The
@@ -167,12 +168,13 @@ Planned: lower capture resolution, INT8 quantisation, DirectML on the integrated
 1. ~~Baseline GRU on KArSL-100, signer 01, official split~~ done, 0.990
 2. ~~Signer-independent evaluation across all three signers~~ done, 0.670 mean top-1
 3. ~~Close the signer gap: hand-scale normalisation, velocity, hand-block dropout, stronger
-   regularisation, Transformer comparison~~ done, 0.670 to 0.833. Next: longer schedule, more
-   augmentation, test-time mirroring
-4. All 502 KArSL signs
-5. ONNX INT8 and DirectML benchmark chapter
-6. Live demo with sign-boundary detection
-7. Continuous Saudi Sign Language on Isharah pose data (CTC over landmark sequences)
+   regularisation, Transformer comparison~~ done, 0.670 to 0.833
+4. ~~Data quality: recover hands lost on the chest, gap filling, face points~~ done, 0.858
+5. ~~Live demo with sign-boundary detection~~ done: browser app, phone camera via QR code,
+   hold-still to end a sign
+6. All 502 KArSL signs
+7. ONNX INT8 and DirectML benchmark chapter
+8. Continuous Saudi Sign Language on Isharah pose data (CTC over landmark sequences)
 
 ## Data
 
