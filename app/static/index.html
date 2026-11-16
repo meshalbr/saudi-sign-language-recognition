@@ -185,6 +185,38 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
 <script>
 (function(){
   const $=id=>document.getElementById(id);
+  // Static build (GitHub Pages, see scripts/build_site.py): there is no server. engine.js runs the
+  // same preprocessing, segmentation and ONNX model in this tab; LocalSocket stands in for the
+  // /ws_feat WebSocket with the same messages, so the rest of the page does not change.
+  const STATIC=!!window.SSL_STATIC;
+  let enginePromise=null;
+  function getEngine(){
+    if(!enginePromise) enginePromise=(async()=>{
+      ort.env.wasm.numThreads=1;  // GitHub Pages is not cross-origin isolated
+      const [cfg,names]=await Promise.all([fetch('model/config.json').then(r=>r.json()),fetch('api/labels').then(r=>r.json())]);
+      return SSLEngine.Engine.create(ort,'model/model.onnx',cfg,names,{sessionOptions:{executionProviders:['wasm']}});
+    })();
+    return enginePromise;
+  }
+  class LocalSocket{
+    constructor(){
+      this.readyState=0; this.onopen=this.onmessage=this.onclose=null; this.q=Promise.resolve();
+      getEngine().then(e=>{ this.engine=e; e.reset(); this.readyState=1; if(this.onopen) this.onopen(); })
+        .catch(err=>{ console.error(err); $('cSrv').textContent='model failed to load'; });
+    }
+    send(text){
+      if(typeof text!=='string'||this.readyState!==1) return;
+      const m=JSON.parse(text);
+      this.q=this.q.then(async()=>{
+        const t0=performance.now();
+        const f=(m.f&&m.f.length===155)?m.f:new Array(155).fill(0), fa=(m.fa&&m.fa.length===39)?m.fa:null;
+        const out=await this.engine.step(f, m.t!==undefined?m.t:t0, !!m.end, fa);
+        out.ms=Math.round((performance.now()-t0)*10)/10;
+        if(this.readyState===1&&this.onmessage) this.onmessage({data:JSON.stringify(out)});
+      }).catch(err=>console.error(err));
+    }
+    close(){ this.readyState=3; }
+  }
   const video=$('video'), overlay=$('overlay'), ctx=overlay.getContext('2d'), stage=$('stage');
   const sendCanvas=document.createElement('canvas'); const sctx=sendCanvas.getContext('2d');
   let ws=null, stream=null, facing='user', inflight=false, labels=[], fpsN=0, fpsT=performance.now();
@@ -200,13 +232,14 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   }));
 
   // Labels + word list
-  fetch('/api/labels').then(r=>r.json()).then(l=>{labels=l; order=l.map((_,i)=>i); renderList(''); $('cSrv').classList.add('on');}).catch(()=>{$('cSrv').textContent='server offline';});
+  fetch('api/labels').then(r=>r.json()).then(l=>{labels=l; order=l.map((_,i)=>i); renderList(''); $('cSrv').classList.add('on');}).catch(()=>{$('cSrv').textContent='server offline';});
   // Public demo: strangers share the server, so no phone pairing and no teach mode.
-  fetch('/api/info').then(r=>r.json()).then(i=>{
+  fetch('api/info').then(r=>r.json()).then(i=>{
     if(!i.public) return;
     $('btnPhone').hidden=true;
     document.querySelector('.teach').hidden=true;
-    $('gateNote').textContent='Your browser finds the skeleton points and sends only those points, never the video. Nothing is stored.';
+    $('gateNote').textContent=i.static?'Everything runs in this browser tab: the camera, MediaPipe and the model. Nothing is uploaded or stored.':'Your browser finds the skeleton points and sends only those points, never the video. Nothing is stored.';
+    if(i.static){ $('btnMode').hidden=true; $('cSrv').textContent='in-browser model'; }
     $('pRefNote').textContent='Copy this movement: the skeleton of a reference recording, the same points the model sees.';
   }).catch(()=>{});
   function renderList(q){
@@ -235,9 +268,9 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
       function step(now){ const i=Math.floor((now-t0)/1000*SPRITE_FPS)%SPRITE_FRAMES; const box=vid.clientHeight; const s=box/fh; vid.style.backgroundSize=`${img.naturalWidth*s}px ${box}px`; vid.style.backgroundPosition=`-${i*fw*s}px 0`; anims[vid.id]=requestAnimationFrame(step); }
       anims[vid.id]=requestAnimationFrame(step);
     };
-    img.src=`/api/sprite/${id}`;
+    img.src=`api/sprite/${id}`;
     if(anims[cv.id]) cancelAnimationFrame(anims[cv.id]);
-    fetch(`/api/ref/${id}`).then(r=>r.ok?r.json():null).then(ref=>{ if(!ref)return; animateSkeleton(cv,ref); }).catch(()=>{});
+    fetch(`api/ref/${id}`).then(r=>r.ok?r.json():null).then(ref=>{ if(!ref)return; animateSkeleton(cv,ref); }).catch(()=>{});
   }
   const POSE9_EDGES=[[1,2],[1,3],[3,5],[2,4],[4,6],[1,7],[2,8],[7,8]]; // nose,shL,shR,elL,elR,wrL,wrR,hipL,hipR
   function animateSkeleton(cv,ref){
@@ -268,10 +301,12 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
     try{
       const vision=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/vision_bundle.mjs');
       const files=await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/wasm');
-      landmarker=await vision.HolisticLandmarker.createFromOptions(files,{baseOptions:{modelAssetPath:'/models/holistic_landmarker.task',delegate:'GPU'},runningMode:'VIDEO',minPoseDetectionConfidence:0.5,minPoseLandmarksConfidence:0.5,minHandLandmarksConfidence:0.5});
-      const recInfo=await fetch('/api/info').then(r=>r.json()).catch(()=>({})); if(recInfo.hand_recovery) handLm=await vision.HandLandmarker.createFromOptions(files,{baseOptions:{modelAssetPath:'/models/hand_landmarker.task',delegate:'GPU'},runningMode:'IMAGE',numHands:2,minHandDetectionConfidence:0.3,minHandPresenceConfidence:0.3}).catch(()=>null);
+      landmarker=await vision.HolisticLandmarker.createFromOptions(files,{baseOptions:{modelAssetPath:'models/holistic_landmarker.task',delegate:'GPU'},runningMode:'VIDEO',minPoseDetectionConfidence:0.5,minPoseLandmarksConfidence:0.5,minHandLandmarksConfidence:0.5});
+      const recInfo=await fetch('api/info').then(r=>r.json()).catch(()=>({})); if(recInfo.hand_recovery) handLm=await vision.HandLandmarker.createFromOptions(files,{baseOptions:{modelAssetPath:'models/hand_landmarker.task',delegate:'GPU'},runningMode:'IMAGE',numHands:2,minHandDetectionConfidence:0.3,minHandPresenceConfidence:0.3}).catch(()=>null);
       fastMode=true; $('cSrv').textContent='browser landmarks'; $('btnMode').textContent='Mode: browser';
-    }catch(e){ console.warn('browser landmarker unavailable, using server path:',e); fastMode=false; $('btnMode').textContent='Mode: server'; }
+    }catch(e){
+      if(STATIC){ console.error(e); $('gateErr').textContent='This browser could not start MediaPipe (it needs WebGL or WebAssembly). Try a recent Chrome, Edge or Safari.'; $('gate').hidden=false; return; }
+      console.warn('browser landmarker unavailable, using server path:',e); fastMode=false; $('btnMode').textContent='Mode: server'; }
   }
   async function enableCamera(){
     try{
@@ -280,6 +315,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
       video.srcObject=stream; await video.play();
       $('gate').hidden=true; $('cCam').textContent='camera on'; $('cCam').classList.add('on');
       if(!landmarker&&!fastMode){ $('cSrv').textContent='loading model…'; await loadLandmarker(); }
+      if(STATIC&&!fastMode) return;
       connect();
     }catch(e){ $('gateErr').textContent='Camera blocked: '+e.message+(location.protocol==='http:'&&location.hostname!=='localhost'?' (phones need the https address)':''); }
   }
@@ -354,9 +390,9 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
 
   // WebSocket streaming
   function connect(){
-    const proto=location.protocol==='https:'?'wss':'ws'; ws=new WebSocket(`${proto}://${location.host}/${fastMode?'ws_feat':'ws'}`);
-    ws.binaryType='arraybuffer';
-    ws.onopen=()=>{inflight=false; $('cSrv').textContent=fastMode?'browser landmarks · connected':'server landmarks · connected'; $('cSrv').classList.add('on'); pump();};
+    if(STATIC){ ws=new LocalSocket(); }
+    else { const proto=location.protocol==='https:'?'wss':'ws'; ws=new WebSocket(`${proto}://${location.host}/${fastMode?'ws_feat':'ws'}`); ws.binaryType='arraybuffer'; }
+    ws.onopen=()=>{inflight=false; $('cSrv').textContent=STATIC?'runs in this browser':fastMode?'browser landmarks · connected':'server landmarks · connected'; $('cSrv').classList.add('on'); pump();};
     ws.onmessage=e=>{inflight=false; onResult(JSON.parse(e.data)); pump();};
     ws.onclose=()=>{$('cSrv').textContent='disconnected'; $('cSrv').classList.remove('on'); setTimeout(()=>{if(stream)connect();},1500);};
   }
@@ -406,24 +442,24 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   }
   $('btnPhone').addEventListener('click',async()=>{
     $('gate').hidden=true; $('pair').hidden=false; $('btnShowQR').hidden=false;
-    try{ const info=await fetch('/api/info').then(r=>r.json()); showQR(info.camera_url); }catch(e){ $('pairUrl').textContent='Could not read the laptop address.'; }
+    try{ const info=await fetch('api/info').then(r=>r.json()); showQR(info.camera_url); }catch(e){ $('pairUrl').textContent='Could not read the laptop address.'; }
     if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } if(ws){ ws.onclose=null; ws.close(); ws=null; } video.srcObject=null; video.hidden=true; $('cCam').textContent='waiting for phone video'; $('cCam').classList.remove('on');
     connectDisplay();
   });
 
   // Teach mode: save the user's own signs, fine-tune, switch models
   let userCounts={};
-  async function refreshUser(){ try{ const u=await fetch('/api/user').then(r=>r.json()); userCounts=u.counts||{}; const tot=Object.values(userCounts).reduce((a,b)=>a+b,0);
+  async function refreshUser(){ try{ const u=await fetch('api/user').then(r=>r.json()); userCounts=u.counts||{}; const tot=Object.values(userCounts).reduce((a,b)=>a+b,0);
       $('teachCount').textContent=`Taught: ${target?(userCounts[target.id]||0):0} examples of this word, ${tot} in total`;
       $('mBase').setAttribute('aria-pressed',u.model==='base'); $('mPersonal').setAttribute('aria-pressed',u.model==='personal');
       const st=u.status||{}; if(st.state==='training') $('trainStatus').textContent=`Training… epoch ${st.epoch} of ${st.epochs}. Keep this page open.`;
       else if(st.state==='done') $('trainStatus').textContent='Done: '+st.message+(u.model==='personal'?'. Now using your model.':'. Press My model to use it.');
       else if(st.state==='error') $('trainStatus').textContent='Training failed: '+st.message;
       return st.state; }catch(e){ return 'error'; } }
-  async function teachSave(){ if(!$('teachOn').checked||!target) return; try{ const r=await fetch('/api/save/'+target.id,{method:'POST'}).then(r=>r.json()); if(r.count){ $('pStatus').textContent+=` · saved as example ${r.count}`; } }catch(e){} refreshUser(); }
-  $('btnTrain').addEventListener('click',async()=>{ const r=await fetch('/api/personalise',{method:'POST'}).then(r=>r.json()); if(!r.started){ $('trainStatus').textContent='Already training.'; } const poll=setInterval(async()=>{ const s=await refreshUser(); if(s!=='training') clearInterval(poll); },3000); refreshUser(); });
-  $('mBase').addEventListener('click',async()=>{ await fetch('/api/model/base',{method:'POST'}); refreshUser(); });
-  $('mPersonal').addEventListener('click',async()=>{ const r=await fetch('/api/model/personal',{method:'POST'}); if(!r.ok) $('trainStatus').textContent='No personal model yet. Record examples and train first.'; refreshUser(); });
+  async function teachSave(){ if(!$('teachOn').checked||!target) return; try{ const r=await fetch('api/save/'+target.id,{method:'POST'}).then(r=>r.json()); if(r.count){ $('pStatus').textContent+=` · saved as example ${r.count}`; } }catch(e){} refreshUser(); }
+  $('btnTrain').addEventListener('click',async()=>{ const r=await fetch('api/personalise',{method:'POST'}).then(r=>r.json()); if(!r.started){ $('trainStatus').textContent='Already training.'; } const poll=setInterval(async()=>{ const s=await refreshUser(); if(s!=='training') clearInterval(poll); },3000); refreshUser(); });
+  $('mBase').addEventListener('click',async()=>{ await fetch('api/model/base',{method:'POST'}); refreshUser(); });
+  $('mPersonal').addEventListener('click',async()=>{ const r=await fetch('api/model/personal',{method:'POST'}); if(!r.ok) $('trainStatus').textContent='No personal model yet. Record examples and train first.'; refreshUser(); });
   refreshUser();
   $('btnShowQR').addEventListener('click',()=>{ $('pair').hidden=!$('pair').hidden; });
   $('btnPairCancel').addEventListener('click',()=>{ $('pair').hidden=true; $('gate').hidden=false; if(phoneWs){ const w=phoneWs; phoneWs=null; w.onclose=null; w.close(); } });

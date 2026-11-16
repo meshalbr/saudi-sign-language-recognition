@@ -24,3 +24,6 @@ Thumbs.db
 models/
 app/certs/
 data/sprites/
+
+# static site build (scripts/build_site.py)
+site/

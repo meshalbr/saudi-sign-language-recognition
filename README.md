@@ -5,6 +5,10 @@
 Live recognition of Saudi Sign Language from a laptop webcam or a phone camera, running on a
 laptop with no graphics card.
 
+**[Try it live in your browser](https://meshalbr.github.io/saudi-sign-language-recognition/)**: allow the camera, sit back so both hands are
+visible, sign, then rest your hands. The **Words** tab shows how each sign is made. Everything runs on your
+own device (MediaPipe, the preprocessing and the 2 MB model), and no video or points are sent anywhere.
+
 ![Demo: the camera with its skeleton, what the model sees, and the live prediction](docs/demo.gif)
 
 *The signer in this clip was never seen during training (leave-one-signer-out model). Left:
@@ -62,6 +66,22 @@ python -m app.server --run runs/final_v3_face --https     # browser app, laptop 
 `download_models.py` fetches the two MediaPipe models from Google and the trained model from
 the [v1.0 release](https://github.com/meshalbr/saudi-sign-language-recognition/releases/tag/v1.0)
 (2 MB ONNX + PyTorch checkpoint + sign names), so no training is needed to try it.
+
+### The live demo (no server)
+
+The [live demo](https://meshalbr.github.io/saudi-sign-language-recognition/) is the same page
+running without the Python server. [`app/static/engine.js`](app/static/engine.js) is a
+line-by-line port of the server path (gap filling, smoothing, motion trimming, resampling, the
+feature transform, the sign segmenter and the best-window search). It runs the ONNX model with
+ONNX Runtime Web. Two checks keep it identical to Python:
+
+- `tests/test_engine_parity.py` runs the JavaScript under Node on the same clips and live streams as
+  the Python code, and requires the same model inputs and the same sign boundaries. It runs on every
+  push, and the site is deployed only if it passes.
+- In a real browser engine, the probabilities on 10 recorded signs differ from Python's ONNX
+  Runtime by at most 3e-7, and the full live path recognised all 10.
+
+`python scripts/build_site.py --out site` builds it after `download_models.py`.
 
 ### With Docker
 
