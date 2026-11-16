@@ -1,7 +1,17 @@
 # Saudi Sign Language Recognition
 
+[![CI](https://github.com/meshalbr/saudi-sign-language-recognition/actions/workflows/ci.yml/badge.svg)](https://github.com/meshalbr/saudi-sign-language-recognition/actions/workflows/ci.yml)
+
 Live recognition of Saudi Sign Language from a laptop webcam or a phone camera, running on a
 laptop with no graphics card.
+
+![Demo: the camera with its skeleton, what the model sees, and the live prediction](docs/demo.gif)
+
+*The signer in this clip was never seen during training (leave-one-signer-out model). Left:
+the camera with the skeleton MediaPipe finds. Middle: the only input the model gets, which is
+points and no video. Right: the top-3 prediction, updated live as the sign happens. The five
+signs are heart, hospital, fever, eat and sleep, and all five came out correct on the first try.
+Made with [`scripts/make_demo.py`](scripts/make_demo.py) from KArSL test videos.*
 
 ## Highlights
 
@@ -55,6 +65,7 @@ python -m app.server --run runs/final_v3_face --https     # browser app, laptop 
 | Train the deployment model | `python -m ssl_recognition.train --config configs/final_tf_all_official.yaml` |
 | Export to ONNX | `python scripts/export_onnx.py --run runs/final_v3_face` |
 | Benchmark | `python scripts/benchmark_cpu.py --run runs/final_v3_face` |
+| Rebuild the demo GIF | `python scripts/make_demo.py --run runs/p6_s02_face --signer s02 --every 3` |
 | Tests | `pytest -q && ruff check .` |
 
 ## Stack
