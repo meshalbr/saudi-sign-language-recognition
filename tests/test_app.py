@@ -153,3 +153,30 @@ def test_a_short_pause_inside_a_sign_does_not_finish_it():
     stream = _moving(30, 0.5) + pause + _moving(30, 0.5, 30) + [_frame(2.3)] * 30
     finals = [o for o in (seg.push(f, k * 33.3) for k, f in enumerate(stream)) if o is not None]
     assert len(finals) == 1 and len(finals[0]) == 75
+
+
+def test_public_mode_blocks_shared_state_and_the_camera_relay(monkeypatch):
+    """In the public demo strangers share one server: no relay, no teach mode, nothing saved."""
+    from fastapi.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+
+    from app import server
+
+    monkeypatch.setenv("SSL_PUBLIC", "1")
+    client = TestClient(server.app)
+    assert client.post("/api/save/0071").status_code == 403
+    assert client.post("/api/personalise").status_code == 403
+    assert client.post("/api/model/personal").status_code == 403
+    assert client.get("/camera").status_code == 404
+    assert client.get("/api/user").json()["public"] is True
+    with pytest.raises(WebSocketDisconnect) as e:
+        with client.websocket_connect("/ws_display") as ws:
+            ws.receive_text()
+    assert e.value.code == 1008
+
+
+def test_public_mode_is_off_by_default(monkeypatch):
+    from app import server
+
+    monkeypatch.delenv("SSL_PUBLIC", raising=False)
+    assert server.is_public() is False

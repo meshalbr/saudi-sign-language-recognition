@@ -63,6 +63,18 @@ python -m app.server --run runs/final_v3_face --https     # browser app, laptop 
 the [v1.0 release](https://github.com/meshalbr/saudi-sign-language-recognition/releases/tag/v1.0)
 (2 MB ONNX + PyTorch checkpoint + sign names), so no training is needed to try it.
 
+### With Docker
+
+```
+docker run -p 7860:7860 ghcr.io/meshalbr/saudi-sign-language-recognition
+```
+
+Then open http://localhost:7860. The CPU-only image is built, started and tested by GitHub Actions on every push.
+The test streams real sign recordings through the WebSocket and checks that the signs come back correct,
+and only then is the image published.
+The image starts in **public mode**: each visitor gets their own session, nothing is saved, and
+the phone relay and teach mode are off (add `-e SSL_PUBLIC=0` for the full app on your own machine).
+
 | Task | Command |
 |---|---|
 | Live webcam demo | `python -m ssl_recognition.infer --run runs/final_v3_face --onnx` |

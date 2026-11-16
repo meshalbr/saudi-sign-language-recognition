@@ -104,7 +104,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
     <canvas id="overlay"></canvas>
     <div class="gate" id="gate">
       <h2>Choose a camera</h2>
-      <p>Everything stays on your own Wi-Fi and nothing is stored.</p>
+      <p id="gateNote">Everything stays on your own Wi-Fi and nothing is stored.</p>
       <div class="gatebtns"><button class="btn" id="btnPhone">Use my phone as camera</button><button class="btn ghost" id="btnEnable">Use this laptop's camera</button></div>
       <p class="muted" id="gateErr"></p>
     </div>
@@ -153,7 +153,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
       <div class="en" id="pEn"></div>
       <div class="id" id="pId"></div>
       <div class="ref" id="pRef"><div class="refvid" id="pVid"></div><canvas class="refcv" id="pCv" width="240" height="240"></canvas></div>
-      <div class="muted">Left: reference recording. Right: the hand movement the model sees.</div>
+      <div class="muted" id="pRefNote">Left: reference recording. Right: the hand movement the model sees.</div>
       <div class="status" id="pStatus">Waiting…</div>
       <div class="bar"><i id="pBar"></i></div>
       <div class="row">
@@ -201,6 +201,14 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
 
   // Labels + word list
   fetch('/api/labels').then(r=>r.json()).then(l=>{labels=l; order=l.map((_,i)=>i); renderList(''); $('cSrv').classList.add('on');}).catch(()=>{$('cSrv').textContent='server offline';});
+  // Public demo: strangers share the server, so no phone pairing and no teach mode.
+  fetch('/api/info').then(r=>r.json()).then(i=>{
+    if(!i.public) return;
+    $('btnPhone').hidden=true;
+    document.querySelector('.teach').hidden=true;
+    $('gateNote').textContent='Your browser finds the skeleton points and sends only those points, never the video. Nothing is stored.';
+    $('pRefNote').textContent='Copy this movement: the skeleton of a reference recording, the same points the model sees.';
+  }).catch(()=>{});
   function renderList(q){
     q=q.trim().toLowerCase();
     $('list').innerHTML=labels.filter(l=>!q||l.id.includes(q)||l.ar.includes(q)||l.en.toLowerCase().includes(q))
@@ -217,7 +225,11 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   function showReference(id,vid,cv){
     // Reference recording as a JPEG strip (codec-free), animated by stepping background-position.
     if(anims[vid.id]) cancelAnimationFrame(anims[vid.id]);
-    const img=new Image(); img.onload=()=>{
+    const img=new Image();
+    // No reference video (e.g. the public demo ships landmarks only): show the skeleton full width.
+    img.onerror=()=>{ vid.hidden=true; vid.parentElement.style.gridTemplateColumns='1fr'; };
+    img.onload=()=>{
+      vid.hidden=false; vid.parentElement.style.gridTemplateColumns='';
       vid.style.backgroundImage=`url("${img.src}")`;
       const fw=img.naturalWidth/SPRITE_FRAMES, fh=img.naturalHeight; const t0=performance.now();
       function step(now){ const i=Math.floor((now-t0)/1000*SPRITE_FPS)%SPRITE_FRAMES; const box=vid.clientHeight; const s=box/fh; vid.style.backgroundSize=`${img.naturalWidth*s}px ${box}px`; vid.style.backgroundPosition=`-${i*fw*s}px 0`; anims[vid.id]=requestAnimationFrame(step); }

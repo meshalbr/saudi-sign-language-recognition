@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import collections
 import json
+import os
 import socket
 import threading
 import time
@@ -34,6 +35,23 @@ CERTS = ROOT / "certs"
 
 app = FastAPI(title="Saudi Sign Language")
 STATE: dict = {"run": None, "names": None, "window": 40, "stride": 1}
+
+
+def is_public() -> bool:
+    """Public deployment (SSL_PUBLIC=1, the default in the Docker image).
+
+    Visitors are strangers to each other, so: no phone-to-display relay (it would show one
+    visitor's camera to another), no teach mode or model switching (shared state, heavy CPU),
+    nothing saved to disk, and at most SSL_MAX_SERVER_SESSIONS visitors whose browser cannot run
+    MediaPipe itself may use the server-side path at once."""
+    return os.environ.get("SSL_PUBLIC", "0") == "1"
+
+
+def disabled() -> JSONResponse:
+    return JSONResponse({"error": "disabled in the public demo"}, status_code=403)
+
+
+SERVER_SESSIONS = {"n": 0}
 
 
 def load_names(path: Path | None, labels: list[str]) -> list[dict]:
@@ -477,7 +495,7 @@ async def ws_feat(websocket: WebSocket):
     """Fast path: the browser runs MediaPipe and sends feature rows (text). It may also send small
     JPEG preview frames (binary), which are relayed to laptop displays."""
     await websocket.accept()
-    relay = websocket.query_params.get("role") == "camera"
+    relay = websocket.query_params.get("role") == "camera" and not is_public()
     sess = Session(relay=relay)
     try:
         while True:
@@ -510,8 +528,20 @@ async def ws_feat(websocket: WebSocket):
 @app.websocket("/ws")
 async def ws(websocket: WebSocket):
     """Server path: the browser sends JPEG frames; MediaPipe runs here."""
+    limit = int(os.environ.get("SSL_MAX_SERVER_SESSIONS", "2"))
+    if is_public() and SERVER_SESSIONS["n"] >= limit:
+        await websocket.close(code=1013, reason="server busy, try again shortly")
+        return
+    SERVER_SESSIONS["n"] += 1
+    try:
+        await _ws_server_path(websocket)
+    finally:
+        SERVER_SESSIONS["n"] -= 1
+
+
+async def _ws_server_path(websocket: WebSocket):
     await websocket.accept()
-    relay = websocket.query_params.get("role") == "camera"
+    relay = websocket.query_params.get("role") == "camera" and not is_public()
     sess = Session(relay=relay)
     t0 = time.time()
     with HolisticExtractor(recover=model_uses_recovery()) as ex:
@@ -559,6 +589,9 @@ async def ws(websocket: WebSocket):
 @app.websocket("/ws_display")
 async def ws_display(websocket: WebSocket):
     """Laptop display: receives results and preview frames from whichever device is the camera."""
+    if is_public():
+        await websocket.close(code=1008, reason="disabled in the public demo")
+        return
     await websocket.accept()
     DISPLAYS.add(websocket)
     try:
@@ -575,6 +608,8 @@ async def ws_display(websocket: WebSocket):
 @app.post("/api/save/{sid}")
 def save_last(sid: str):
     """Store the most recent completed sign as the user's example of word ``sid``."""
+    if is_public():
+        return disabled()
     from app import personalise
 
     if LAST_SIGN["x"] is None:
@@ -588,6 +623,8 @@ def save_last(sid: str):
 
 @app.get("/api/user")
 def user_info():
+    if is_public():
+        return {"counts": {}, "status": {"state": "disabled"}, "model": "base", "public": True}
     from app import personalise
 
     return {
@@ -599,6 +636,8 @@ def user_info():
 
 @app.post("/api/personalise")
 def personalise_start():
+    if is_public():
+        return disabled()
     from app import personalise
 
     base = Path(STATE.get("base_run") or STATE["run"])
@@ -618,6 +657,8 @@ def personalise_start():
 @app.post("/api/model/{which}")
 def choose_model(which: str):
     """Switch between the base model and the personalised one."""
+    if is_public():
+        return disabled()
     base = STATE.get("base_run") or STATE["run"]
     STATE["base_run"] = base
     target = "runs/personal" if which == "personal" else base
@@ -631,6 +672,8 @@ def choose_model(which: str):
 
 @app.get("/camera")
 def camera_page():
+    if is_public():
+        return JSONResponse({"error": "phone camera pairing is off in the public demo"}, 404)
     return FileResponse(STATIC / "camera.html", headers=NO_CACHE)
 
 
@@ -638,7 +681,8 @@ def camera_page():
 def info():
     port = STATE.get("https_port", 8443)
     return {
-        "camera_url": f"https://{lan_ip()}:{port}/camera",
+        "public": is_public(),
+        "camera_url": None if is_public() else f"https://{lan_ip()}:{port}/camera",
         "displays": len(DISPLAYS),
         "hand_recovery": model_uses_recovery(),
     }
