@@ -55,9 +55,13 @@ Full experiment log: [`reports/results.md`](reports/results.md).
 ```
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -e ".[dev,app]"
-python scripts/download_models.py
+python scripts/download_models.py                          # MediaPipe models + trained model
 python -m app.server --run runs/final_v3_face --https     # browser app, laptop and phone
 ```
+
+`download_models.py` fetches the two MediaPipe models from Google and the trained model from
+the [v1.0 release](https://github.com/meshalbr/saudi-sign-language-recognition/releases/tag/v1.0)
+(2 MB ONNX + PyTorch checkpoint + sign names), so no training is needed to try it.
 
 | Task | Command |
 |---|---|
