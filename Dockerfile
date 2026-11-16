@@ -22,12 +22,18 @@ RUN apt-get update \
 RUN useradd --create-home --uid 1000 app
 WORKDIR /app
 
-# Dependencies first, so code changes do not reinstall them. CPU-only torch is ~200 MB,
-# the default CUDA build would be ~2.5 GB.
+# Dependencies first, so code changes do not reinstall them. The app runs the ONNX model, so
+# PyTorch (about 1 GB installed) is left out unless you build with --build-arg WITH_TORCH=1,
+# which teach mode (SSL_PUBLIC=0) needs. That build uses the CPU wheel, not the 2.5 GB CUDA one.
+ARG WITH_TORCH=0
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install torch --index-url https://download.pytorch.org/whl/cpu \
-    && pip install -e ".[app]"
+RUN if [ "$WITH_TORCH" = "1" ]; then \
+        pip install torch --index-url https://download.pytorch.org/whl/cpu; \
+    fi \
+    && pip install --no-deps -e . \
+    && pip install numpy mediapipe onnxruntime pyyaml tqdm \
+        fastapi "uvicorn[standard]"
 
 COPY app ./app
 COPY scripts ./scripts
