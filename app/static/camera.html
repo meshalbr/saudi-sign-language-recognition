@@ -171,6 +171,7 @@ async function start(){
   }catch(e){ $('err').textContent='Camera blocked: '+e.message; }
 }
 $('btnStart').onclick=start;
+start(); // the phone came here from the QR code, so switch the camera on at once; the button stays as a fallback
 $('camSel').onchange=e=>{ deviceId=e.target.value; const lab=e.target.selectedOptions[0]?.textContent||''; $('stage').classList.toggle('mirror',/front|user/i.test(lab)); start(); };
 // Wide angle: zoom the current lens out as far as it allows, or switch to an ultra-wide lens
 $('btnWide').onclick=async()=>{

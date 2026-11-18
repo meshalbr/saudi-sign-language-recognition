@@ -236,7 +236,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   // Two camera buttons on every device. On a phone or tablet: front camera / back camera.
   // On a computer: its own camera / the phone. Locally the phone pairs with this computer (results here);
   // in the public demo strangers share the server, so the phone button opens the demo on the phone itself.
-  const onPhone=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  const onPhone=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)||(/Macintosh/.test(navigator.userAgent)&&navigator.maxTouchPoints>1); // iPadOS reports a Mac
   let phoneBtn=onPhone?'back':null;
   if(onPhone){ $('btnEnable').textContent='Front camera (sign yourself)'; $('btnPhone').textContent='Back camera (film someone)'; $('btnShowQR').hidden=true; }
   fetch('api/info').then(r=>r.json()).then(i=>{
@@ -384,6 +384,8 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   }
   let lastLm={pose:[],left:[],right:[]};
   $('btnEnable').addEventListener('click',()=>{ if(phoneBtn==='back'){ facing='user'; stage.classList.add('mirror'); } enableCamera(); });
+  // Opened from the QR code on a computer: switch the front camera on straight away (the camera buttons stay as a fallback).
+  if(location.hash==='#camera') enableCamera();
   $('btnFlip').addEventListener('click',()=>{facing=facing==='user'?'environment':'user'; stage.classList.toggle('mirror',facing==='user'); if(stream) enableCamera();});
   $('btnMirror').addEventListener('click',()=>stage.classList.toggle('mirror'));
   // Mode: browser (MediaPipe in the page, GPU) vs server (JPEG frames to the laptop). Compare the fps chip.
@@ -448,8 +450,8 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
   $('btnPhone').addEventListener('click',async()=>{
     if(phoneBtn==='back'){ facing='environment'; stage.classList.remove('mirror'); enableCamera(); return; }
     if(phoneBtn==='qr'){
-      $('gate').hidden=true; $('pair').hidden=false; showQR(location.href.split('#')[0]);
-      $('pairHelp').textContent='Scan this code with your phone camera. The demo opens on the phone and runs there completely: sign in front of the phone and the words appear on the phone screen.';
+      $('gate').hidden=true; $('pair').hidden=false; showQR(location.href.split('#')[0]+'#camera');
+      $('pairHelp').textContent='Scan this code with your phone camera. The demo opens on the phone with its camera already on and runs there completely: sign in front of the phone and the words appear on the phone screen.';
       return;
     }
     $('gate').hidden=true; $('pair').hidden=false; $('btnShowQR').hidden=false;
