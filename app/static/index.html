@@ -105,14 +105,14 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
     <div class="gate" id="gate">
       <h2>Choose a camera</h2>
       <p id="gateNote">Everything stays on your own Wi-Fi and nothing is stored.</p>
-      <div class="gatebtns"><button class="btn" id="btnPhone">Use my phone as camera</button><button class="btn ghost" id="btnEnable">Use this laptop's camera</button></div>
+      <div class="gatebtns"><button class="btn" id="btnEnable">Use this computer's camera</button><button class="btn ghost" id="btnPhone">Use my phone as the camera</button></div>
       <p class="muted" id="gateErr"></p>
     </div>
     <div class="gate" id="pair" hidden>
       <h2>Scan with your phone</h2>
       <div id="qr" class="qr"></div>
       <p class="mono" id="pairUrl"></p>
-      <p>Same Wi-Fi as this laptop. Accept the security warning once, press Start camera, then sign. Results appear here.</p>
+      <p id="pairHelp">Use the same Wi-Fi as this computer. Accept the security warning once, press Start camera, then sign in front of the phone. The results appear on this screen.</p>
       <button class="btn ghost" id="btnPairCancel">Back</button>
     </div>
     <div class="toolbar">
@@ -176,7 +176,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
       <div class="ref" id="wRef" hidden><div class="refvid" id="wVid"></div><canvas class="refcv" id="wCv" width="240" height="240"></canvas></div>
       <div class="row" id="wRow" hidden><span class="muted" id="wName"></span><button class="btn" id="btnPractiseThis">Practise this</button></div>
       <div class="list" id="list"></div>
-      <div class="muted">Tap a word to see how it is signed.</div>
+      <div class="muted">Choose a word to see how it is signed.</div>
     </div>
   </aside>
 </main>
@@ -233,10 +233,15 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
 
   // Labels + word list
   fetch('api/labels').then(r=>r.json()).then(l=>{labels=l; order=l.map((_,i)=>i); renderList(''); $('cSrv').classList.add('on');}).catch(()=>{$('cSrv').textContent='server offline';});
-  // Public demo: strangers share the server, so no phone pairing and no teach mode.
+  // Two camera buttons on every device. On a phone or tablet: front camera / back camera.
+  // On a computer: its own camera / the phone. Locally the phone pairs with this computer (results here);
+  // in the public demo strangers share the server, so the phone button opens the demo on the phone itself.
+  const onPhone=/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  let phoneBtn=onPhone?'back':null;
+  if(onPhone){ $('btnEnable').textContent='Front camera (sign yourself)'; $('btnPhone').textContent='Back camera (film someone)'; $('btnShowQR').hidden=true; }
   fetch('api/info').then(r=>r.json()).then(i=>{
     if(!i.public) return;
-    $('btnPhone').hidden=true;
+    if(!onPhone){ phoneBtn='qr'; $('btnPhone').textContent="Use my phone's camera"; }
     document.querySelector('.teach').hidden=true;
     $('gateNote').textContent=i.static?'Everything runs in this browser tab: the camera, MediaPipe and the model. Nothing is uploaded or stored.':'Your browser finds the skeleton points and sends only those points, never the video. Nothing is stored.';
     if(i.static){ $('btnMode').hidden=true; $('cSrv').textContent='in-browser model'; }
@@ -378,7 +383,7 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
     inflight=true; ws.send(JSON.stringify(msg));
   }
   let lastLm={pose:[],left:[],right:[]};
-  $('btnEnable').addEventListener('click',enableCamera);
+  $('btnEnable').addEventListener('click',()=>{ if(phoneBtn==='back'){ facing='user'; stage.classList.add('mirror'); } enableCamera(); });
   $('btnFlip').addEventListener('click',()=>{facing=facing==='user'?'environment':'user'; stage.classList.toggle('mirror',facing==='user'); if(stream) enableCamera();});
   $('btnMirror').addEventListener('click',()=>stage.classList.toggle('mirror'));
   // Mode: browser (MediaPipe in the page, GPU) vs server (JPEG frames to the laptop). Compare the fps chip.
@@ -441,8 +446,14 @@ main{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(320px,1fr);gap:14
     for(const [pts,col] of [[lm.left||[],'rgba(61,214,140,.95)'],[lm.right||[],'rgba(242,184,59,.95)']]){ if(!pts.length) continue; ctx.strokeStyle=col; ctx.lineWidth=3; HAND_EDGES.forEach(([a,b])=>{ if(!pts[a]||!pts[b])return; const A=P(pts[a]),B=P(pts[b]); ctx.beginPath(); ctx.moveTo(A[0],A[1]); ctx.lineTo(B[0],B[1]); ctx.stroke(); }); }
   }
   $('btnPhone').addEventListener('click',async()=>{
+    if(phoneBtn==='back'){ facing='environment'; stage.classList.remove('mirror'); enableCamera(); return; }
+    if(phoneBtn==='qr'){
+      $('gate').hidden=true; $('pair').hidden=false; showQR(location.href.split('#')[0]);
+      $('pairHelp').textContent='Scan this code with your phone camera. The demo opens on the phone and runs there completely: sign in front of the phone and the words appear on the phone screen.';
+      return;
+    }
     $('gate').hidden=true; $('pair').hidden=false; $('btnShowQR').hidden=false;
-    try{ const info=await fetch('api/info').then(r=>r.json()); showQR(info.camera_url); }catch(e){ $('pairUrl').textContent='Could not read the laptop address.'; }
+    try{ const info=await fetch('api/info').then(r=>r.json()); showQR(info.camera_url); }catch(e){ $('pairUrl').textContent="Could not read this computer's address."; }
     if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } if(ws){ ws.onclose=null; ws.close(); ws=null; } video.srcObject=null; video.hidden=true; $('cCam').textContent='waiting for phone video'; $('cCam').classList.remove('on');
     connectDisplay();
   });

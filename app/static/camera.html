@@ -44,7 +44,7 @@ select option{color:#111}
 </div>
 <div class="gate" id="gate">
   <h1>Phone camera</h1>
-  <p>Your phone films you and sends the hand movement to the laptop, where the result is shown.</p>
+  <p>This phone films the signer and sends only the hand movement to the computer. The result is shown here and on the computer screen.</p>
   <button class="primary" id="btnStart" style="flex:none;padding:14px 28px">Start camera</button>
   <p id="err"></p>
 </div>
@@ -66,7 +66,7 @@ async function loadLandmarker(){
     landmarker=await vision.HolisticLandmarker.createFromOptions(files,{baseOptions:{modelAssetPath:'/models/holistic_landmarker.task',delegate:'GPU'},runningMode:'VIDEO'});
     const recInfo=await fetch('/api/info').then(r=>r.json()).catch(()=>({})); if(recInfo.hand_recovery) handLm=await vision.HandLandmarker.createFromOptions(files,{baseOptions:{modelAssetPath:'/models/hand_landmarker.task',delegate:'GPU'},runningMode:'IMAGE',numHands:2,minHandDetectionConfidence:0.3,minHandPresenceConfidence:0.3}).catch(()=>null);
     fast=true; $('cMode').textContent='phone GPU';
-  }catch(e){ console.warn(e); fast=false; $('cMode').textContent='laptop CPU'; }
+  }catch(e){ console.warn(e); fast=false; $('cMode').textContent='computer CPU'; }
 }
 
 // Hand recovery (same rule as ssl_recognition.landmarks.recover_hands): when Holistic loses a
@@ -137,7 +137,7 @@ function step(){
 }
 function connect(){
   ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/${fast?'ws_feat':'ws'}?role=camera`); ws.binaryType='arraybuffer';
-  ws.onopen=()=>{inflight=false; $('cConn').textContent='connected to laptop'; $('cConn').classList.add('on');};
+  ws.onopen=()=>{inflight=false; $('cConn').textContent='connected to computer'; $('cConn').classList.add('on');};
   ws.onmessage=e=>{ inflight=false; const r=JSON.parse(e.data);
     fpsN++; const now=performance.now(); if(now-fpsT>1000){$('cFps').textContent=Math.round(fpsN*1000/(now-fpsT))+' fps'; fpsN=0; fpsT=now;}
     if(!fast&&r.lm) draw(r.lm);
