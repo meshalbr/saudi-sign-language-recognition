@@ -65,7 +65,8 @@ python -m app.server --run runs/final_v3_face --https     # browser app, laptop 
 
 `download_models.py` fetches the two MediaPipe models from Google and the trained model from
 the [v1.0 release](https://github.com/meshalbr/saudi-sign-language-recognition/releases/tag/v1.0)
-(2 MB ONNX + PyTorch checkpoint + sign names), so no training is needed to try it.
+(2 MB ONNX + PyTorch checkpoint + sign names) and one reference clip per sign (skeleton and a
+short video strip), so no training is needed to try it.
 
 ### The live demo (no server)
 
@@ -112,6 +113,13 @@ Python, PyTorch, MediaPipe, ONNX Runtime, FastAPI, WebSockets, GitHub Actions.
 
 [KArSL](https://hamzah-luqman.github.io/KArSL/) (KFUPM): 502 isolated Arabic signs, 3 signers.
 KArSL-100 is signs 0071 to 0170.
+
+The Practice and Words tabs show one short reference clip per sign (24 frames of signer 01,
+240 px, cropped to the signer by [`scripts/make_sprites.py`](scripts/make_sprites.py)) so users
+can copy the movement. These clips come from KArSL: Sidig, Luqman, Mahmoud and Mohandes,
+"KArSL: Arabic Sign Language Database", *ACM TALLIP* 20(1), 2021. They are shown only to teach
+the signs, in a free, non-commercial demo. If you are a KArSL author and want them removed, please
+open an issue and they will be taken down.
 
 ## Licence
 

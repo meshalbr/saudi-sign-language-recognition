@@ -23,6 +23,7 @@ from ssl_recognition.features import fill_gaps
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "app" / "static"
 ORT_WEB = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"
+SPRITE_H = 240  # same as app.server.SPRITE_H (part of the sprite file name)
 
 
 def coverage(npz: Path) -> float:
@@ -31,13 +32,16 @@ def coverage(npz: Path) -> float:
     return float(((x[:, -2] + x[:, -1]) > 0).mean())
 
 
-def reference(sid: str, landmarks: Path) -> dict | None:
-    """Same choice and format as app.server.reference: best-tracked signer 01 test clip."""
+def best_clip(sid: str, landmarks: Path) -> Path | None:
+    """Same choice as app.server._best_reference_stem: best-tracked signer 01 test clip."""
     d = landmarks / sid
     cands = sorted(d.glob("s01_test_*.npz")) or sorted(d.glob("*.npz"))
-    if not cands:
-        return None
-    with np.load(max(cands[:20], key=coverage)) as z:
+    return max(cands[:20], key=coverage) if cands else None
+
+
+def reference(clip: Path, sid: str) -> dict:
+    """Same format as app.server.reference."""
+    with np.load(clip) as z:
         x = fill_gaps(z["x"], 8)
     def pts(row, a, b, n):
         return np.round(row[a:b].reshape(n, 3)[:, :2], 3).tolist()
@@ -63,6 +67,7 @@ def main() -> None:
     ap.add_argument("--run", default="runs/final_v3_face")
     ap.add_argument("--names", default="data/karsl_labels.json")
     ap.add_argument("--landmarks", default="data/landmarks")
+    ap.add_argument("--sprites", default="data/sprites")
     ap.add_argument("--out", default="site")
     args = ap.parse_args()
     run, out = ROOT / args.run, ROOT / args.out
@@ -107,12 +112,20 @@ def main() -> None:
         out / "api" / "user",
         {"counts": {}, "status": {"state": "disabled"}, "model": "base", "public": True},
     )
-    n_refs = 0
+    # reference skeleton per sign, plus the real reference video strip (KArSL, signer 01) when
+    # download_models.py has fetched the sprites (scripts/make_sprites.py makes them)
+    n_refs = n_vids = 0
     for n in names:
-        ref = reference(n["id"], ROOT / args.landmarks)
-        if ref is not None:
-            write_json(out / "api" / "ref" / n["id"], ref)
-            n_refs += 1
+        clip = best_clip(n["id"], ROOT / args.landmarks)
+        if clip is None:
+            continue
+        write_json(out / "api" / "ref" / n["id"], reference(clip, n["id"]))
+        n_refs += 1
+        strip = ROOT / args.sprites / f"{n['id']}_{clip.stem}_{SPRITE_H}.jpg"
+        if strip.exists():
+            (out / "api" / "sprite").mkdir(parents=True, exist_ok=True)
+            shutil.copy(strip, out / "api" / "sprite" / f"{n['id']}.jpg")
+            n_vids += 1
     (out / "models").mkdir()
     for task in ("holistic_landmarker.task", "hand_landmarker.task"):
         shutil.copy(ROOT / "models" / task, out / "models" / task)
@@ -120,7 +133,7 @@ def main() -> None:
 
     size = sum(f.stat().st_size for f in out.rglob("*") if f.is_file()) / 1e6
     print(f"built {out}: {len(names)} signs, {n_refs} reference skeletons, "
-          f"{size:.1f} MB")
+          f"{n_vids} reference videos, {size:.1f} MB")
 
 
 if __name__ == "__main__":

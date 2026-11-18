@@ -165,7 +165,37 @@ def reference(sid: str):
     return JSONResponse({"id": sid, "fps": 30, "frames": frames})
 
 
-SPRITE_FRAMES, SPRITE_H = 24, 180
+SPRITE_FRAMES, SPRITE_H = 24, 240
+
+
+def _signer_square(frames: list, idx) -> tuple[int, int, int]:
+    """Square crop (x0, y0, side) around the signer over the whole clip.
+
+    KArSL is filmed against a plain teal wall, so everything that is not teal is the signer
+    (or the chair). The union over the clip covers raised hands too. Falls back to the centre
+    square when the background is not found."""
+    fh, fw = frames[0].shape[:2]
+    k = 4
+    fg = np.zeros((fh // k, fw // k), bool)
+    for i in idx:
+        hsv = cv2.cvtColor(cv2.resize(frames[i], (fw // k, fh // k)), cv2.COLOR_BGR2HSV)
+        hue, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+        teal = (hue >= 60) & (hue <= 105) & (sat >= 50) & (val >= 60)
+        fg |= ~teal
+    fg = cv2.morphologyEx(fg.astype(np.uint8), cv2.MORPH_OPEN, np.ones((5, 5), np.uint8)) > 0
+    fg[int(fg.shape[0] * 0.75):] = False  # legs, chair and floor: not needed to read a sign
+    fg[:, : fg.shape[1] // 50] = False  # dark frame edges
+    fg[:, -(fg.shape[1] // 50):] = False
+    cols, rows = np.nonzero(fg.sum(0) > 3)[0], np.nonzero(fg.sum(1) > 3)[0]
+    side = min(fh, fw)
+    if fg.mean() > 0.6 or len(cols) == 0 or len(rows) == 0:
+        return (fw - side) // 2, (fh - side) // 2, side
+    x0, x1, y0 = cols[0] * k, (cols[-1] + 1) * k, rows[0] * k
+    side = int(min(fh, fw, max((x1 - x0) * 1.2, 0.55 * fh)))
+    top = max(0, int(y0 - 0.06 * side))
+    top = min(top, fh - side)
+    left = int(min(max(0, (x0 + x1) / 2 - side / 2), fw - side))
+    return left, top, side
 
 
 @app.get("/api/sprite/{sid}")
@@ -173,7 +203,7 @@ def sprite(sid: str):
     """Reference clip rendered once into a horizontal strip of JPEG frames (codec-free playback)."""
     if not _valid_sid(sid):
         return JSONResponse({"error": "unknown sign"}, status_code=404)
-    dest = Path("data/sprites") / f"{sid}_{_best_reference_stem(sid)}.jpg"
+    dest = Path("data/sprites") / f"{sid}_{_best_reference_stem(sid)}_{SPRITE_H}.jpg"
     if not dest.exists():
         f = _reference_file(sid, ".mp4", "data/videos")
         if f is None:
@@ -189,9 +219,7 @@ def sprite(sid: str):
         if not frames:
             return JSONResponse({"error": "unreadable video"}, status_code=500)
         idx = np.linspace(0, len(frames) - 1, SPRITE_FRAMES).astype(int)
-        fh, fw = frames[0].shape[:2]
-        side = min(fh, fw)  # centre square crop: the signer stands in the middle of the frame
-        x0, y0 = (fw - side) // 2, (fh - side) // 2
+        x0, y0, side = _signer_square(frames, idx)
         strip = np.concatenate(
             [
                 cv2.resize(

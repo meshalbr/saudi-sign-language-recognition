@@ -9,6 +9,8 @@
 - data/karsl_labels.json            English and Arabic names of the KArSL signs
 - data/landmarks/<sign>/*.npz       one reference recording per sign, landmarks only (no video),
                                     for the skeleton animation in the Practice and Words tabs
+- data/sprites/<sign>_<clip>_240.jpg the same recording as a short real-video strip (24 frames,
+                                    KArSL signer 01, 23 MB), shown next to the skeleton
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 RELEASE = "https://github.com/meshalbr/saudi-sign-language-recognition/releases/download/v1.0/"
 RELEASE_URL = RELEASE + "final_v3_face.zip"
 REFS_URL = RELEASE + "references.zip"
+SPRITES_URL = RELEASE + "sprites.zip"
 RUN_DIR = ROOT / "runs" / "final_v3_face"
 
 
@@ -52,6 +55,13 @@ def fetch_refs() -> None:
     unzip(REFS_URL)
 
 
+def fetch_sprites() -> None:
+    if any((ROOT / "data" / "sprites").glob("*_240.jpg")):
+        print("already present: data/sprites")
+        return
+    unzip(SPRITES_URL)
+
+
 def unzip(url: str) -> None:
     print(f"downloading {url}")
     with urlopen(url) as r:
@@ -76,3 +86,4 @@ if __name__ == "__main__":
     if not args.no_run:
         fetch_run()
         fetch_refs()
+        fetch_sprites()
